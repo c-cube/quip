@@ -1,6 +1,7 @@
 
 (** {1 Proof checker} *)
 
+open Quip_core
 open Common
 
 let main pb proof : unit =

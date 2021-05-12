@@ -1,4 +1,6 @@
 
+include Quip_core.Common
+
 module K = Trustee_core.Kernel
 module Log = Trustee_core.Log
 

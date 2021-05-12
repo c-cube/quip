@@ -7,5 +7,6 @@
   (license MIT)
   (depends
     (containers (and (>= "3.0") (< "4.0")))
+    ppx_deriving
     (smtlib-utils (>= "0.3"))
     trustee))

@@ -1,0 +1,8 @@
+
+(library
+  (name quip_core)
+  (public_name quip.core)
+  (synopsis "Core AST and parser for Quip")
+  (libraries smtlib-utils containers ppx_deriving.runtime)
+  (preprocess (pps ppx_deriving.std))
+  (flags :standard -warn-error -a+8))

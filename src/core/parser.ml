@@ -230,10 +230,12 @@ module Proof = struct
       | _ -> parse_errorf s "expected term"
     in loop sexp
 
+  let lit_of_sexp (self:env) (sexp:sexp) : lit
+
   let cl_of_sexp (self:env) (s:sexp) : P.clause =
     match s.s with
     | List ({s=Atom "cl";_} :: lits) ->
-      let c_lits = List.map (t_of_sexp self) lits in
+      let c_lits = List.map (lit_of_sexp self) lits in
       {P.c_lits}
     | _ -> parse_errorf s "expected a clause `(cl t1 t2 … tn)`"
 

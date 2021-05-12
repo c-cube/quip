@@ -1,6 +1,0 @@
-
-(executable
-  (name quip)
-  (public_name quip)
-  (libraries trustee.core smtlib-utils containers)
-  (flags :standard -warn-error -a+8))

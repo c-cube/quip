@@ -1,0 +1,7 @@
+
+(library
+  (name quip_check)
+  (public_name quip.check)
+  (libraries quip.core trustee.core containers ppx_deriving.runtime)
+  (preprocess (pps ppx_deriving.std))
+  (flags :standard -warn-error -a+8))

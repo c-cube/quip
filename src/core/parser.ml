@@ -1,9 +1,9 @@
 
 open Common
 
-module Loc = Trustee_core.Loc
-module P = Proof
+module A = Ast
 
+(*
 type env = {
   ctx: K.ctx;
   tys: (string, K.ty_const) Hashtbl.t;
@@ -36,7 +36,9 @@ let create_env ctx : env =
   mkc "xor" @@ [bool;bool] @-> bool;
   mkc "=>" @@ [bool;bool] @-> bool;
   self
+   *)
 
+(* TODO: parse problems into trustee terms?
 module Pb = struct
   module Smtlib = Smtlib_utils.V_2_6
   module A = Smtlib.Ast
@@ -172,8 +174,12 @@ module Pb = struct
       List.iter (process_stmt self) stmts;
       ()
 end
+   *)
 
 module Proof = struct
+  module P = A.Proof
+  module T = A.Term
+
   type sexp = {
     loc: Loc.t option;
     s: sexp_view;
@@ -200,43 +206,45 @@ module Proof = struct
         | List l -> list l
       end)
 
-  let t_of_sexp (self:env) (sexp:sexp) : E.t =
-    let rec loop s : E.t =
-      let find_const name =
-        try Hashtbl.find self.consts name
-        with Not_found ->
-          parse_errorf s "unknown constant '%s'" name
-      in
-
+  let t_of_sexp (sexp:sexp) : T.t =
+    let rec loop s : T.t =
       match s.s with
-      | Atom name ->
-        begin
-          try Hashtbl.find self.named_terms name
-          with Not_found ->
-            let c = find_const name in
-            E.const self.ctx c []
-        end
-      | List [{s=Atom "=";_}; a; b] -> E.app_eq self.ctx (loop a) (loop b)
+      | Atom name -> T.const name
+      | List [{s=Atom "=";_}; a; b] -> T.eq (loop a) (loop b)
+                                         (*
       | List [{s=Atom "!";_}; a; {s=Atom ":named";_}; {s=Atom name;_}] ->
         let u = loop a in
         Hashtbl.add self.named_terms name u;
         u
       | List ({s=Atom "!";_} :: _) ->
         parse_errorf s "unimplemented `!`" (* TODO: named expr *)
+                                            *)
+      | List [{s=Atom "let";_}; {s=List l;_}; bod] ->
+        let l = List.map (function
+            | {s=List [{s=Atom v;_}; t];_} -> A.Var.make ~ty:() v, loop t
+            | s -> parse_errorf s "expected `(<var> <term>)`")
+            l
+        in
+        T.Let (l, loop bod)
+      | List [{s=Atom "ite";_}; a; b; c] ->
+        T.Ite (loop a, loop b, loop c)
       | List ({s=Atom f;_} :: args) ->
-        let f = find_const f in
         let args = List.map loop args in
-        E.app_l self.ctx (E.const self.ctx f []) args
+        T.app_name f args
       | _ -> parse_errorf s "expected term"
     in loop sexp
 
-  let lit_of_sexp (self:env) (sexp:sexp) : lit
+  let lit_of_sexp (sexp:sexp) : A.lit =
+    match sexp.s with
+    | List [{s=Atom "+";_}; t] -> A.Lit.a (t_of_sexp t)
+    | List [{s=Atom "-";_}; t] -> A.Lit.na (t_of_sexp t)
+    | _ -> parse_errorf sexp "expected `(± <term>)`"
 
-  let cl_of_sexp (self:env) (s:sexp) : P.clause =
+  let cl_of_sexp (s:sexp) : A.clause =
     match s.s with
     | List ({s=Atom "cl";_} :: lits) ->
-      let c_lits = List.map (lit_of_sexp self) lits in
-      {P.c_lits}
+      let c_lits = List.map lit_of_sexp lits in
+      c_lits
     | _ -> parse_errorf s "expected a clause `(cl t1 t2 … tn)`"
 
   let rules =

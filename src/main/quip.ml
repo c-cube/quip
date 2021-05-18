@@ -4,9 +4,11 @@
 open Quip_core
 open Common
 
-let main ~problem:_ proof : unit =
+let main ~quiet ~problem:_ proof : unit =
   let proof = CCIO.with_in proof (Parser.Proof.parse_chan ~filename:proof) in
-  Fmt.printf "parsed@ %a@." Ast.Proof.pp proof;
+  if not quiet then (
+    Fmt.printf "parsed proof:@ %a@." Ast.Proof.pp proof;
+  );
   (*
   let ctx = K.Ctx.create() in
   let env = Parser.create_env ctx in
@@ -28,10 +30,12 @@ let () =
   let files = ref [] in
   let color = ref true in
   let pb = ref "" in
+  let quiet = ref false in
   let opts = [
     "-d", Arg.Int Trustee_core.Log.set_level, " set log level";
     "-nc", Arg.Clear color, " disable color";
     "--problem", Arg.Set_string pb, " <file> set problem file";
+    "-q", Arg.Set quiet, " quiet mode";
   ] |> Arg.align in
   Arg.parse opts (fun f -> files := f :: !files) "quip [opt]* proof.quip";
 
@@ -39,5 +43,8 @@ let () =
   match List.rev !files with
   | [proof] ->
     let problem = if !pb="" then None else Some !pb in
-    main problem proof
-  | _ -> error "expected <problem> <proof>"
+    begin
+      try main ~quiet:!quiet ~problem proof
+      with Error e -> Fmt.eprintf "@{<Red>Error@}: %s" e; exit 1
+    end
+  | _ -> Fmt.eprintf "expected <problem> <proof>@."; exit 1

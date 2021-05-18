@@ -24,19 +24,29 @@ module Var : sig
 end
 
 module Term : sig
-  type t =
-    | App of t * t list
-    | Fun of Ty.t Var.t * t
+  type ('t,'ty) view =
+    | App of 't * 't list
+    | Fun of 'ty Var.t * 't
     | Var of unit Var.t
-    | Ite of t * t * t
-    | As of t * Ty.t (* cast *)
-    | Let of (unit Var.t * t) list * t
-  [@@deriving show]
+    | Ite of 't * 't * 't
+    | As of 't * Ty.t (* cast *)
+    | Let of (unit Var.t * 't) list * 't
+  [@@deriving show, map, fold, iter]
 
-  val eq : t -> t -> t
-  val app_var : unit Var.t -> t list -> t
-  val app_name : Name.t -> t list -> t
-  val const : Name.t -> t
+  type t
+
+  val view : t -> (t, Ty.t) view
+  val loc : t -> Loc.t option
+  val map_shallow : (t -> t) -> t -> t
+
+  val var : loc:Loc.t option -> unit Var.t -> t
+  val eq : loc:Loc.t option -> t -> t -> t
+  val app_var : loc:Loc.t option -> unit Var.t -> t list -> t
+  val app_name : loc:Loc.t option -> Name.t -> t list -> t
+  val const : loc:Loc.t option -> Name.t -> t
+  val let_ : loc:Loc.t option -> (unit Var.t * t) list -> t -> t
+  val fun_ : loc:Loc.t option -> Ty.t Var.t -> t -> t
+  val ite : loc:Loc.t option -> t -> t -> t -> t
 end
 
 type term = Term.t
@@ -49,8 +59,6 @@ module Lit : sig
 
   val a : term -> t
   val na : term -> t
-  val eq : term -> term -> t
-  val neq : term -> term -> t
   val not : t -> t
 end
 

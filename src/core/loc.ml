@@ -10,10 +10,12 @@ type t = {
 
 let pp out (self:t) : unit =
   if self.start.P.line = self.end_.P.line then (
-    Fmt.fprintf out "%d:%d-%d" self.start.P.line self.start.P.col self.end_.P.col
+    Fmt.fprintf out "'%s': %d:%d-%d"
+      self.file self.start.P.line self.start.P.col self.end_.P.col
   ) else (
-    Fmt.fprintf out "%d:%d-%d:%d"
-      self.start.P.line self.start.P.col self.end_.P.line self.end_.P.col
+    Fmt.fprintf out "'%s': %d:%d-%d:%d"
+      self.file self.start.P.line self.start.P.col
+      self.end_.P.line self.end_.P.col
   )
 let show = Fmt.to_string pp
 

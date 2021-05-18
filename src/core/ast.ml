@@ -3,7 +3,8 @@ open Common
 
 module Name = struct
   type t = string
-  [@@deriving show]
+  let pp out s = Fmt.string out s
+  let show s = s
 end
 
 module Ty = struct
@@ -20,23 +21,61 @@ module Var = struct
     name: Name.t [@main];
     ty: 'ty;
   }
-  [@@deriving show, make]
+  [@@deriving make, map, fold, iter]
+
+  let pp pp_ty out v = Fmt.fprintf out "(@[%a : %a@])" Name.pp v.name pp_ty v.ty
+  let show pp_ty v = Fmt.to_string (pp pp_ty) v
+  let pp_name out v = Name.pp out v.name
 end
 
-module Term = struct
-  type t =
-    | App of t * t list
-    | Fun of Ty.t Var.t * t
-    | Var of unit Var.t
-    | Ite of t * t * t
-    | As of t * Ty.t (* cast *)
-    | Let of (unit Var.t * t) list * t
-  [@@deriving show]
+let pp_l pp out l = Fmt.(list ~sep:(return "@ ") pp) out l
 
-  let app_var v l : t = App (Var v, l)
-  let app_name v l : t = app_var (Var.make ~ty:() v) l
-  let const c = app_name c []
-  let eq a b : t = app_name "=" [a;b]
+module Term = struct
+  type ('t,'ty) view =
+    | App of 't * 't list
+    | Fun of 'ty Var.t * 't
+    | Var of unit Var.t
+    | Ite of 't * 't * 't
+    | As of 't * Ty.t (* cast *)
+    | Let of (unit Var.t * 't) list * 't
+  [@@deriving show, map, fold, iter]
+
+  type t = {
+    view: (t, Ty.t) view;
+    loc: Loc.t option;
+  }
+
+  let[@inline] mk_ ~loc view : t = {loc; view}
+  let[@inline] view t = t.view
+  let[@inline] loc t = t.loc
+
+  let map_shallow f t =
+    {t with view=map_view f (fun ty->ty) t.view}
+
+  let var ~loc v = mk_ ~loc (Var v)
+  let app_var ~loc v l : t =
+    let v = var ~loc v in
+    if l=[] then v else mk_ ~loc (App (v, l))
+  let app_name ~loc v l : t = app_var ~loc (Var.make ~ty:() v) l
+  let const ~loc c = app_name ~loc c []
+  let eq ~loc a b : t = app_name ~loc "=" [a;b]
+  let let_ ~loc bs bod : t = mk_ ~loc (Let (bs,bod))
+  let fun_ ~loc v bod : t = mk_ ~loc (Fun (v,bod))
+  let ite ~loc a b c : t = mk_ ~loc (Ite (a,b,c))
+
+  let rec pp out t = match t.view with
+    | Var v -> Var.pp_name out v
+    | App (f, l) ->
+      Fmt.fprintf out "(@[%a@ %a@])" pp f (pp_l pp) l
+    | Ite (a,b,c) -> Fmt.fprintf out "(@[ite@ %a@ %a@ %a@])" pp a pp b pp c
+    | Let (bs, bod) ->
+      let ppb out (v,t) = Fmt.fprintf out "(@[%a@ %a@])" Var.pp_name v pp t in
+      Fmt.fprintf out "(@[let@ (@[%a@]@ %a@])" (pp_l ppb) bs pp bod
+    | Fun (v,t) ->
+      Fmt.fprintf out "(@[lambda %a@ %a@])" (Var.pp Ty.pp) v pp t
+    | As (t,ty) -> Fmt.fprintf out "(@[as@ %a@ %a@])" pp t Ty.pp ty
+
+  let show = Fmt.to_string pp
 end
 
 type term = Term.t [@@deriving show]
@@ -56,8 +95,6 @@ module Lit = struct
 
   let a t = make ~sign:true t
   let na t = make ~sign:false t
-  let eq t u = a (Term.eq t u)
-  let neq t u = na (Term.eq t u)
 end
 
 type lit = Lit.t [@@deriving show]
@@ -73,15 +110,14 @@ type clause = Clause.t [@@deriving show]
 
 module Proof = struct
   type t =
-    | Unspecified
     | Sorry (* NOTE: v. bad as we don't even specify the return *)
-    | Sorry_c of clause
+    | Sorry_c of clause (* TODO: also specify parents, so we still know the DAG *)
     | Named of string (* refers to previously defined clause *)
     | Refl of term
     | CC_lemma_imply of t list * term * term
     | CC_lemma of clause
-    | Assertion of term
-    | Assertion_c of clause
+    | Assert of term
+    | Assert_c of clause
     | Hres of t * hres_step list
     | DT_isa_split of ty * term list
     | DT_isa_disj of ty * term * term
@@ -98,7 +134,7 @@ module Proof = struct
         assumptions: (string * lit) list;
         steps: composite_step array; (* last step is the proof *)
       }
-  [@@deriving show]
+  [@@deriving show {with_path=false}]
 
   and composite_step =
     | S_step_c of {
@@ -108,7 +144,7 @@ module Proof = struct
       }
     | S_define_t of term * term (* [const := t] *)
     | S_define_t_name of string * term (* [const := t] *)
-  [@@deriving show]
+  [@@deriving show {with_path=false}]
 
     (* TODO: be able to name clauses, to be expanded at parsing.
        note that this is not the same as [S_step_c] which defines an
@@ -140,7 +176,6 @@ module Proof = struct
     | Refl _ -> true
     | _ -> false
 
-  let default=Unspecified
   let sorry_c c = Sorry_c c
   let sorry = Sorry
   let refl t : t = Refl t
@@ -148,8 +183,8 @@ module Proof = struct
   let cc_lemma c : t = CC_lemma c
   let cc_imply_l l t u : t = CC_lemma_imply (l, t, u)
   let cc_imply2 h1 h2 t u : t = CC_lemma_imply ([h1; h2], t, u)
-  let assertion t = Assertion t
-  let assertion_c c = Assertion_c c
+  let assertion t = Assert t
+  let assertion_c c = Assert_c c
   let composite_a ?(assms=[]) steps : t =
     Composite {assumptions=assms; steps}
   let composite_l ?(assms=[]) steps : t =
@@ -176,13 +211,13 @@ module Proof = struct
   (* TODO: expose? *)
   let iter_p (p:t) ~f_t ~f_step ~f_clause ~f_p : unit =
     match p with
-    | Unspecified | Sorry -> ()
+    | Sorry -> ()
     | Sorry_c c -> f_clause c
     | Named _ -> ()
     | Refl t -> f_t t
     | CC_lemma_imply (ps, t, u) -> List.iter f_p ps; f_t t; f_t u
-    | CC_lemma c | Assertion_c c -> f_clause c
-    | Assertion t -> f_t t
+    | CC_lemma c | Assert_c c -> f_clause c
+    | Assert t -> f_t t
     | Hres (i, l) ->
       f_p i;
       List.iter

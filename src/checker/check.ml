@@ -2,8 +2,9 @@
 
 module K = Trustee_core.Kernel
 module E = K.Expr
-module Log = Trustee_core.Log
-module P = Proof
+module P = Quip_core.Ast.Proof
+
+module Log = (val Logs.src_log (Logs.Src.create ~doc:"Proof checker" "quip.check"))
 
 type t = {
   ctx: K.ctx;
@@ -11,12 +12,12 @@ type t = {
 }
 
 let create ctx : t =
-  { ctx; checked=Hashtbl.create 32}
+  { ctx; checked=Hashtbl.create 32; }
 
-let check_step (self:t) (step:P.step) : unit =
-  Log.debugf 1 (fun k->k"checking step %a" P.pp_step step);
+let check_step (_self:t) (step:P.composite_step) : unit =
+  Log.debug (fun k->k"checking step %a" P.pp_composite_step step);
   assert false (* TODO *)
 
-let check_proof (self:t) (p:P.t) : bool =
-  Log.debugf 1 (fun k->k"checking proof");
+let check_proof (_self:t) (p:P.t) : bool =
+  Log.debug (fun k->k"checking proof");
   false (* TODO: check each step, and glue all steps together *)

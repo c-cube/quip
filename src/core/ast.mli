@@ -89,7 +89,8 @@ module Proof : sig
   val p1 : t -> hres_step
   (** Unit paramodulation *)
 
-  type composite_step
+  type composite_step [@@deriving show]
+
   val stepc : name:string -> lit list -> t -> composite_step
   val deft : term -> term -> composite_step (** define a (new) atomic term *)
 

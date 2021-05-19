@@ -1,5 +1,6 @@
 
 module Fmt = CCFormat
+module K = Trustee_core.Kernel
 
 exception Error of string
 let error msg = raise (Error msg)

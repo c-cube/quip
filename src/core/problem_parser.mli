@@ -11,5 +11,7 @@ module Smtlib : sig
   val parse_file_exn : string -> pb
 end
 
-(** Parse a file, guessing the format based on its extension *)
 val parse_file : string -> (pb, string) result
+(** Parse a file, guessing the format based on its extension *)
+
+val parse_file_exn : string -> pb

@@ -27,3 +27,5 @@ module type S = sig
 end
 
 type t = (module S)
+
+val pp_debug : t Fmt.printer

@@ -17,3 +17,5 @@ module type S = sig
 end
 
 type t = (module S)
+
+let pp_debug out (module M:S) = M.pp_debug out ()

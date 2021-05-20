@@ -27,7 +27,8 @@ let main ~quiet ~problem proof : unit =
     Log.debug (fun k->k"parsed proof");
     Fmt.printf "parsed proof:@ %a@." Ast.Proof.pp proof;
   );
-  let _pb = Problem_parser.parse_file problem in
+  let pb = Problem_parser.parse_file_exn problem in
+  Log.debug (fun k->k"parsed problem:@ %a" Parsed_pb.pp_debug pb);
   (*
   let ctx = K.Ctx.create() in
   let env = Parser.create_env ctx in

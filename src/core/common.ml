@@ -1,6 +1,7 @@
 
 module Fmt = CCFormat
 module K = Trustee_core.Kernel
+module Str_map = CCMap.Make(String)
 
 exception Error of string
 let error msg = raise (Error msg)

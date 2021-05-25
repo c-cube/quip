@@ -14,6 +14,8 @@ open Common
 module type S = sig
   val ctx : K.ctx
 
+  val find_builtin : Builtin.t -> K.const option
+
   val find_const_by_name : string -> K.const option
 
   val find_ty_const_by_name : string -> K.ty_const option

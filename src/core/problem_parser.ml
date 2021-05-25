@@ -23,32 +23,38 @@ module Smtlib = struct
     consts: (string, K.const [@printer K.Const.pp]) tbl;
     ty_consts: (string, K.ty_const [@printer K.Const.pp]) tbl;
     named_terms: (string, K.Expr.t) tbl;
+    builtins: (K.const [@printer K.Const.pp]) Builtin.Tbl.t;
     assms: (K.Thm.t [@printer K.Thm.pp_quoted]) vec;
   } [@@deriving show {with_path=false}]
 
-  let create() : env =
-    let ctx = K.Ctx.create() in
+  let create ctx : env =
     let self = {
       ctx;
       consts=Hashtbl.create 32;
       ty_consts=Hashtbl.create 32;
+      builtins=Builtin.Tbl.create 16;
       named_terms=Hashtbl.create 32;
       assms=CCVector.create();
     } in
 
     (* pre-populate with some builtins *)
-    let bool = E.bool ctx in
-    Hashtbl.add self.ty_consts "Bool" (K.Const.bool ctx);
-    let (@->) a b = E.arrow_l ctx a b in
-    let mkc s ty = Hashtbl.add self.consts s (E.new_const ctx s [] ty); in
-    mkc "true" @@ [bool] @-> bool;
-    mkc "false" @@ [bool] @-> bool;
-    mkc "not" @@ [bool] @-> bool;
-    mkc "and" @@ [bool;bool] @-> bool;
-    mkc "or" @@ [bool;bool] @-> bool;
-    mkc "xor" @@ [bool;bool] @-> bool;
-    mkc "=>" @@ [bool;bool] @-> bool;
-
+    begin
+      let bool = E.bool ctx in
+      Hashtbl.add self.ty_consts "Bool" (K.Const.bool ctx);
+      let (@->) a b = E.arrow_l ctx a b in
+      let mkc s b ty =
+        let c =  E.new_const ctx s [] ty in
+        Hashtbl.add self.consts s c;
+        Builtin.Tbl.add self.builtins b c;
+      in
+      mkc "true" Builtin.True @@ bool;
+      mkc "false" Builtin.False @@ bool;
+      mkc "not" Builtin.Not @@ [bool] @-> bool;
+      mkc "and" Builtin.And @@ [bool;bool] @-> bool;
+      mkc "or" Builtin.Or @@ [bool;bool] @-> bool;
+      mkc "xor" Builtin.Xor @@ [bool;bool] @-> bool;
+      mkc "=>" Builtin.Imply @@ [bool;bool] @-> bool;
+    end;
     self
 
   let conv_ty ~ty_vars (self:env) ty : K.expr =
@@ -132,7 +138,6 @@ module Smtlib = struct
     in
     loop Str_map.empty e
 
-
   let add_stmt (self:env) (stmt:SA.statement) : unit =
     Log.debug (fun k->k"(@[process-stmt@ %a@])" SA.pp_stmt stmt);
     let _loc = stmt.SA.loc in (* TODO: convert *)
@@ -177,7 +182,7 @@ module Smtlib = struct
       | SA.Stmt_reset | SA.Stmt_reset_assertions | SA.Stmt_exit -> ()
     end
 
-  let parse_file_exn filename : pb =
+  let parse_file_exn ctx filename : pb =
     Log.debug (fun k->k"parse SMTLIB file '%s'" filename);
     let pb =
       try Smtlib_utils.V_2_6.parse_file_exn filename
@@ -187,31 +192,32 @@ module Smtlib = struct
     Log.info (fun k->k"parsed %d statements" (List.length pb));
     Log.debug (fun k->k"@[<v2>problem:@ %a@]@." SA.(pp_list pp_stmt) pb);
 
-    let env = create() in
+    let env = create ctx in
     List.iter (add_stmt env) pb;
 
     let module PB = struct
       let ctx = env.ctx
       let find_const_by_name n = CCHashtbl.get env.consts n
       let find_ty_const_by_name n = CCHashtbl.get env.ty_consts n
+      let find_builtin b = Builtin.Tbl.get env.builtins b
       let assumptions () = CCVector.to_seq env.assms
       let pp_debug out () = pp_env out env
     end in
     (module PB)
 
-  let parse_file file =
-    try Ok (parse_file_exn file)
+  let parse_file ctx file =
+    try Ok (parse_file_exn ctx file)
     with Error s -> Error s
 end
 
-let parse_file filename : _ result =
+let parse_file ctx filename : _ result =
   match Filename.extension filename with
   | ".smt2" ->
-    Smtlib.parse_file filename
+    Smtlib.parse_file ctx filename
   | ext ->
     errorf "unknown problem extension '%s'" ext
 
-let parse_file_exn filename =
-  match parse_file filename with
+let parse_file_exn ctx filename =
+  match parse_file ctx filename with
   | Ok x -> x
   | Error e -> error e

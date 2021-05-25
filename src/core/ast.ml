@@ -109,7 +109,7 @@ end
 type clause = Clause.t [@@deriving show]
 
 module Proof = struct
-  type t =
+  type view =
     | Sorry (* NOTE: v. bad as we don't even specify the return *)
     | Sorry_c of clause (* TODO: also specify parents, so we still know the DAG *)
     | Named of string (* refers to previously defined clause *)
@@ -135,6 +135,8 @@ module Proof = struct
         steps: composite_step array; (* last step is the proof *)
       }
   [@@deriving show {with_path=false}]
+
+  and t=view
 
   and composite_step =
     | S_step_c of {
@@ -162,6 +164,8 @@ module Proof = struct
     | P of { lhs: term; rhs: term; p: t}
     | P1 of t
   [@@deriving show]
+
+  let[@inline] view p = p
 
   let r p ~pivot : hres_step = R { pivot; p }
   let r1 p = R1 p

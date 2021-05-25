@@ -34,6 +34,7 @@ module Term : sig
   [@@deriving show, map, fold, iter]
 
   type t
+  [@@deriving show]
 
   val view : t -> (t, Ty.t) view
   val loc : t -> Loc.t option
@@ -77,6 +78,36 @@ module Proof : sig
   (** hyper-resolution steps: resolution, unit resolution;
       bool paramodulation, unit bool paramodulation *)
 
+  type composite_step [@@deriving show]
+
+  type view =
+    | Sorry (* NOTE: v. bad as we don't even specify the return *)
+    | Sorry_c of clause (* TODO: also specify parents, so we still know the DAG *)
+    | Named of string (* refers to previously defined clause *)
+    | Refl of term
+    | CC_lemma_imply of t list * term * term
+    | CC_lemma of clause
+    | Assert of term
+    | Assert_c of clause
+    | Hres of t * hres_step list
+    | DT_isa_split of ty * term list
+    | DT_isa_disj of ty * term * term
+    | DT_cstor_inj of Name.t * int * term list * term list (* [c t…=c u… |- t_i=u_i] *)
+    | Bool_true_is_true
+    | Bool_true_neq_false
+    | Bool_eq of term * term (* equal by pure boolean reasoning *)
+    | Bool_c of clause (* boolean tautology *)
+    | Ite_true of term (* given [if a b c] returns [a=T |- if a b c=b] *)
+    | Ite_false of term
+    | LRA of clause
+    | Composite of {
+        (* some named (atomic) assumptions *)
+        assumptions: (string * lit) list;
+        steps: composite_step array; (* last step is the proof *)
+      }
+
+  val view : t -> view
+
   val r : t -> pivot:term -> hres_step
   (** Resolution step on given pivot term *)
 
@@ -88,8 +119,6 @@ module Proof : sig
 
   val p1 : t -> hres_step
   (** Unit paramodulation *)
-
-  type composite_step [@@deriving show]
 
   val stepc : name:string -> lit list -> t -> composite_step
   val deft : term -> term -> composite_step (** define a (new) atomic term *)

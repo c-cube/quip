@@ -20,31 +20,28 @@ let setup_log lvl : unit =
   Logs.set_reporter (Logs.format_reporter ());
   Logs.set_level ~all:true (Some lvl)
 
-let main ~quiet ~problem proof : unit =
+(* check proof for problem, then exits *)
+let main ~quiet ~problem proof : 'a =
   Log.info (fun k->k"process proof '%s' with problem '%s'" proof problem);
   let proof = CCIO.with_in proof (Parser.Proof.parse_chan ~filename:proof) in
   if not quiet then (
     Log.debug (fun k->k"parsed proof");
     Fmt.printf "parsed proof:@ %a@." Ast.Proof.pp proof;
   );
-  let pb = Problem_parser.parse_file_exn problem in
-  Log.debug (fun k->k"parsed problem:@ %a" Parsed_pb.pp_debug pb);
-  (*
   let ctx = K.Ctx.create() in
-  let env = Parser.create_env ctx in
-  Fmt.printf "parsing problem from '%s'…@." pb;
-  let pb = CCIO.with_in pb (Parser.Pb.parse_chan ~filename:pb env) in
-  Fmt.printf "parsing proof from '%s'…@." proof;
-  let proof = CCIO.with_in proof (Parser.Proof.parse_chan ~filename:proof env) in
+  let problem = Problem_parser.parse_file_exn ctx problem in
+  Log.debug (fun k->k"parsed problem:@ %a" Parsed_pb.pp_debug problem);
+
+  let checker = Quip_check.Check.create ctx problem in
+
   Fmt.printf "checking proof…@.";
-  let checker = Check.create ctx in
-  if Check.check_proof checker proof then (
+  let proof_valid = Quip_check.Check.check_proof checker proof in
+  if proof_valid then (
     Fmt.printf "@{<Green>OK@}@.";
   ) else (
     Fmt.printf "@{<Green>FAIL@}@.";
   );
-     *)
-  ()
+  exit (if proof_valid then 0 else 1)
 
 let () =
   let files = ref [] in
@@ -71,10 +68,10 @@ let () =
       with
       | Error msg ->
         Log.err (fun k->k "error: %s" msg);
-        Fmt.eprintf "@{<Red>Error@}: %s" msg; exit 1
+        Fmt.eprintf "@{<Red>Error@}: %s" msg; exit 3
       | e ->
         let msg = Printexc.to_string e in
         Log.err (fun k->k "error: %s" msg);
-        Fmt.eprintf "@{<Red>Error@}: %s" msg; exit 1
+        Fmt.eprintf "@{<Red>Error@}: %s" msg; exit 3
     end
-  | _ -> Fmt.eprintf "expected <problem> <proof>@."; exit 1
+  | _ -> Fmt.eprintf "expected <problem> <proof>@."; exit 2

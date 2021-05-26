@@ -9,6 +9,7 @@ module Log = (val Logs.src_log (Logs.Src.create "quip.main"))
 let setup_log lvl : unit =
   Trustee_core.Log.(
     let module Log = (val Logs.src_log (Logs.Src.create "trustee")) in
+    set_level 50;
     set_logger {
       log=fun lvl k ->
         let m : _ Logs.msgf = fun logger -> k (fun fmt -> logger ?header:None ?tags:None fmt)in

@@ -45,6 +45,8 @@ module Make(A : ARG) : S = struct
   module Lit : sig
     type t [@@deriving show]
     val neg : t -> t
+    val sign : t -> bool
+    val atom : t -> E.t
     val to_expr : t -> E.t
     val make : ?sign:bool -> E.t -> t
   end = struct
@@ -58,6 +60,8 @@ module Make(A : ARG) : S = struct
       Fmt.fprintf out "(@[%s@ %a@])" s K.Expr.pp self.expr
     let show = Fmt.to_string pp
 
+    let[@inline] sign self = self.sign
+    let[@inline] atom self = self.expr
     let make ?(sign=true) expr = {sign;expr}
     let[@inline] neg (self:t) : t = {self with sign=not self.sign}
 
@@ -94,10 +98,20 @@ module Make(A : ARG) : S = struct
   *)
   module N_clause : sig
     type t [@@deriving show]
+
     val equal : t -> t -> bool
+
     val equal_to_clause : t -> Clause.t -> bool
+
     val of_thm: K.thm -> t
+    (** Turn the theorem into one with [|- false] as conclusion *)
+
     val of_clause_axiom : Clause.t -> t
+    (** Make an axiom of this clause, in the negative form. *)
+
+    val move_lit_to_rhs : t -> K.thm
+    (** Assuming the clause has only one literal (on the left),
+        move it to the right to obtain a "normal" theorem *)
   end = struct
     type t = {
       as_th: K.thm [@printer K.Thm.pp_quoted];
@@ -122,14 +136,25 @@ module Make(A : ARG) : S = struct
         (K.Thm.hyps_sorted_l self.as_th)
         c_lits
 
-    (* axiom: [¬a, a |- false] *)
     let _var_a = K.Var.make "a" Cst.bool
+
+    (* axiom: [¬a, a |- false] *)
     let ax_prove_false =
       K.Thm.axiom ctx
         [ E.var ctx _var_a;
           E.app ctx Cst.not_ (E.var ctx _var_a);
         ]
         Cst.false_
+
+    (* axiom: [false |- a] *)
+    let ax_ex_falso =
+      K.Thm.axiom ctx [Cst.false_] (E.var ctx _var_a)
+
+    (* axiom: [|- ¬a = (a=false)] *)
+    let ax_not_is_eq_false =
+      let a = E.var ctx _var_a in
+      let t = E.(app_eq ctx (app ctx Cst.not_ a) (app_eq ctx a Cst.false_)) in
+      K.Thm.axiom ctx [] t
 
     (* move conclusion to the left, to get a negated clause *)
     let of_thm (th:K.thm) : t =
@@ -167,6 +192,33 @@ module Make(A : ARG) : S = struct
         |> CCList.sort_uniq ~cmp:E.compare
       in
       {as_th=K.Thm.axiom ctx c_lits Cst.false_}
+
+    (* C1: G, a |- false
+       C2: false |- a
+       C3: G |- a=false (bool-eq-intro C1 C2)
+       C4: |- ¬a = (a=false) (ax)
+       C5: |- (a=false) = ¬a (sym C4)
+       C6: G |- ¬a (bool-eq C3 C5)
+    *)
+    let move_lit_to_rhs_ (self:t) (e:E.t) : K.thm =
+      let th2 =
+        K.Thm.subst ~recursive:false ctx ax_ex_falso
+          (K.Subst.of_list [_var_a, e])
+      in
+      let th3 = K.Thm.bool_eq_intro ctx self.as_th th2 in
+      let th4 =
+        K.Thm.subst ~recursive:false ctx ax_not_is_eq_false
+          (K.Subst.of_list [_var_a, e])
+        |> K.Thm.sym ctx
+      in
+      K.Thm.bool_eq ctx th3 th4
+
+    let move_lit_to_rhs (self:t) : K.thm =
+      match K.Thm.hyps_l self.as_th with
+      | [e] -> move_lit_to_rhs_ self e
+      | _ ->
+        errorf
+          (fun k->k"n-clause.move_lit_to_rhs:@ expected single literal in %a" pp self)
   end
 
   type st = {
@@ -180,8 +232,6 @@ module Make(A : ARG) : S = struct
     named_terms = Hashtbl.create 32;
     all_ok = true;
   }
-
-  (* TODO: a bunch of axioms for translation *)
 
   let rec conv_term (t: Ast.term) : K.expr =
     let module T = Ast.Term in
@@ -251,7 +301,8 @@ module Make(A : ARG) : S = struct
         N_clause.of_thm (K.Thm.refl ctx t)
 
       | P.Assert t ->
-        (* TODO: lookup in problem? *)
+        Log.warn (fun k->k"TODO: find assert in assumptions");
+        (* FIXME: lookup in problem? *)
         (* TODO: use theory mechanism to track asserts *)
 
         (* assume: [¬t \/ t] *)
@@ -283,11 +334,59 @@ module Make(A : ARG) : S = struct
             errorf (fun k->k"cannot find step with name '%s'" name)
         end
 
+      | P.CC_lemma_imply (ps, t, u) ->
+        (* prove [ps |- t=u] *)
+        let t = conv_term t in
+        let u = conv_term u in
+
+        (* check sub-proofs, and turn them into positive equations *)
+        let ps =
+          ps
+          |> List.rev_map check_proof_rec_
+          |> List.rev_map N_clause.move_lit_to_rhs
+        in
+
+        let module CC = Trustee_core.Congruence_closure in
+        begin match CC.prove_cc ctx ps t u with
+          | None ->
+            errorf (fun k->k"failed to prove CC-lemma@ %a" P.pp p)
+          | Some thm ->
+            N_clause.of_thm thm
+        end
+
+      | P.CC_lemma c ->
+        let c = conv_clause c in
+
+        let pos, negs = List.partition Lit.sign (Clause.lits c) in
+        begin match pos with
+          | [l1] ->
+            let t, u = match E.unfold_eq (Lit.to_expr l1) with
+              | Some p -> p
+              | None ->
+                errorf (fun k->k"cc-lemma: positive literal must be an equation")
+            in
+
+            let ps = List.map (fun l -> K.Thm.assume ctx (Lit.atom l)) negs in
+
+            (* prove [negs |- t=u] *)
+            Log.debug
+              (fun k->k"cc-lemma@ :ps %a@ :t %a@ :u %a"
+                      (Fmt.Dump.list K.Thm.pp_quoted) ps E.pp t E.pp u);
+
+            let module CC = Trustee_core.Congruence_closure in
+            begin match CC.prove_cc ctx ps t u with
+              | None ->
+                errorf (fun k->k"failed to prove CC-lemma@ %a" P.pp p)
+              | Some thm ->
+                N_clause.of_thm thm
+            end
+          | _ ->
+            errorf
+              (fun k->k"cc-lemma: expected exactly one positive literal@ in %a" P.pp p)
+          end
       | P.Assert_c _
         (* TODO: lookup in problem? *)
 
-      | P.CC_lemma_imply (_, _, _)
-      | P.CC_lemma _
       | P.Hres (_, _)
       | P.DT_isa_split (_, _)
       | P.DT_isa_disj (_, _, _)
@@ -316,6 +415,7 @@ module Make(A : ARG) : S = struct
 
       let c = check_proof_rec_ proof in
       Hashtbl.add st.checked name c;
+      Log.debug (fun k->k"step '%s'@ yields %a" name N_clause.pp c);
 
       let expected_res = conv_clause res in
 

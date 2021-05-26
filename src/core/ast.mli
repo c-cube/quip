@@ -21,6 +21,7 @@ module Var : sig
     ty: 'ty;
   }
   [@@deriving show, make]
+  val pp_name : _ t Fmt.printer
 end
 
 module Term : sig
@@ -78,7 +79,14 @@ module Proof : sig
   (** hyper-resolution steps: resolution, unit resolution;
       bool paramodulation, unit bool paramodulation *)
 
-  type composite_step [@@deriving show]
+  type composite_step =
+    | S_step_c of {
+        name: string; (* name *)
+        res: clause; (* result of [proof] *)
+        proof: t; (* sub-proof *)
+      }
+    | S_define_t of string * term (* [const := t] *)
+  [@@deriving show]
 
   type view =
     | Sorry (* NOTE: v. bad as we don't even specify the return *)
@@ -121,7 +129,7 @@ module Proof : sig
   (** Unit paramodulation *)
 
   val stepc : name:string -> lit list -> t -> composite_step
-  val deft : term -> term -> composite_step (** define a (new) atomic term *)
+  val deft : string -> term -> composite_step (** define a (new) atomic term *)
 
   val is_trivial_refl : t -> bool
   (** is this a proof of [|- t=t]? This can be used to remove

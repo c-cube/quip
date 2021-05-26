@@ -7,6 +7,8 @@ type t =
   | Imply
   | Not
   | Xor
+  | Eq
+  | Bool
 [@@deriving show {with_path=false}, eq, enum]
 
 let hash (x:t) : int = CCHash.int (to_enum x)

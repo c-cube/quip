@@ -203,9 +203,9 @@ module Proof = struct
 
   and step_of_sexp (s:sexp) : P.composite_step =
     match s.s with
-    | List [{s=Atom "deft";_}; {s=Atom name;loc=loc_name}; t] ->
+    | List [{s=Atom "deft";_}; {s=Atom name;loc=_}; t] ->
       let t = t_of_sexp t in
-      P.deft (T.const ~loc:loc_name name) t
+      P.deft name t
     | List [{s=Atom "stepc";_}; {s=Atom name;_}; cl; sub_pr] ->
       let cl = cl_of_sexp cl in
       let sub_pr = p_of_sexp sub_pr in

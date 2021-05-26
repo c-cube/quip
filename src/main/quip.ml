@@ -39,7 +39,7 @@ let main ~quiet ~problem proof : 'a =
   if proof_valid then (
     Fmt.printf "@{<Green>OK@}@.";
   ) else (
-    Fmt.printf "@{<Green>FAIL@}@.";
+    Fmt.printf "@{<Red>FAIL@}@.";
   );
   exit (if proof_valid then 0 else 1)
 

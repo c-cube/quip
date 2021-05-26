@@ -144,8 +144,7 @@ module Proof = struct
         res: clause; (* result of [proof] *)
         proof: t; (* sub-proof *)
       }
-    | S_define_t of term * term (* [const := t] *)
-    | S_define_t_name of string * term (* [const := t] *)
+    | S_define_t of string * term (* [const := t] *)
   [@@deriving show {with_path=false}]
 
     (* TODO: be able to name clauses, to be expanded at parsing.
@@ -174,7 +173,6 @@ module Proof = struct
 
   let stepc ~name res proof : composite_step = S_step_c {proof;name;res}
   let deft c rhs : composite_step = S_define_t (c,rhs)
-  let deft_name c rhs : composite_step = S_define_t_name (c,rhs)
 
   let is_trivial_refl = function
     | Refl _ -> true

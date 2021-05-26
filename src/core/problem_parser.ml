@@ -42,10 +42,16 @@ module Smtlib = struct
       let bool = E.bool ctx in
       Hashtbl.add self.ty_consts "Bool" (K.Const.bool ctx);
       let (@->) a b = E.arrow_l ctx a b in
-      let mkc s b ty =
-        let c =  E.new_const ctx s [] ty in
+      let addc s b c =
         Hashtbl.add self.consts s c;
         Builtin.Tbl.add self.builtins b c;
+      and addtyc s b c =
+        Hashtbl.add self.ty_consts s c;
+        Builtin.Tbl.add self.builtins b c;
+      in
+      let mkc s b ty =
+        let c =  E.new_const ctx s [] ty in
+        addc s b c
       in
       mkc "true" Builtin.True @@ bool;
       mkc "false" Builtin.False @@ bool;
@@ -54,6 +60,8 @@ module Smtlib = struct
       mkc "or" Builtin.Or @@ [bool;bool] @-> bool;
       mkc "xor" Builtin.Xor @@ [bool;bool] @-> bool;
       mkc "=>" Builtin.Imply @@ [bool;bool] @-> bool;
+      addtyc "Bool" Builtin.Bool (K.Const.bool ctx);
+      addc "=" Builtin.Eq (K.Const.eq ctx);
     end;
     self
 
@@ -164,7 +172,7 @@ module Smtlib = struct
 
       | SA.Stmt_assert t ->
         let t = conv_expr self t in
-        let th = K.Thm.axiom self.ctx t in
+        let th = K.Thm.axiom self.ctx [] t in
         Log.info (fun k->k"(@[assert@ %a@])" K.Thm.pp_quoted th);
         CCVector.push self.assms th;
 

@@ -103,13 +103,33 @@ module Make(A : ARG) : S = struct
 
     val equal_to_clause : t -> Clause.t -> bool
 
+    val as_th : t -> K.thm
+    (** [as_th c] returns a theorem of the shape [l1, …, ln |- false] *)
+
     val of_thm: K.thm -> t
     (** Turn the theorem into one with [|- false] as conclusion *)
 
     val of_clause_axiom : Clause.t -> t
     (** Make an axiom of this clause, in the negative form. *)
 
-    val move_lit_to_rhs : t -> K.thm
+    val iter_lits : t -> E.t Iter.t
+    (** Iterate on literals. Remember that the literals are negated wrt.
+        the actual clause this represents. *)
+
+    val find_lit_by_term : t -> E.t -> (bool * E.t) option
+    (** [find_lit_by_term c t] finds the literal in [c] with given atom,
+        along with the sign of this literal wrt [t].
+        The sign is [true] iff [t] and the literal are the same. *)
+
+    val find_uniq_lit : t -> E.t option
+    (** [find_uniq_lit c] returns [Some a] if [c] is the theorem [a |- false],
+        otherwise it returns None *)
+
+    val move_lit_to_rhs : t -> E.t -> K.thm
+    (** Assuming the clause contains this literal,
+        move it to the right to obtain a "normal" theorem *)
+
+    val move_uniq_lit_to_rhs : t -> K.thm
     (** Assuming the clause has only one literal (on the left),
         move it to the right to obtain a "normal" theorem *)
   end = struct
@@ -121,6 +141,7 @@ module Make(A : ARG) : S = struct
       Fmt.fprintf out "(@[n-clause@ %a@])" K.Thm.pp_quoted self.as_th
     let show = Fmt.to_string pp
 
+    let as_th self = self.as_th
     let equal (a:t) (b:t): bool =
       CCList.equal E.equal
         (K.Thm.hyps_sorted_l a.as_th)
@@ -154,6 +175,12 @@ module Make(A : ARG) : S = struct
     let ax_not_is_eq_false =
       let a = E.var ctx _var_a in
       let t = E.(app_eq ctx (app ctx Cst.not_ a) (app_eq ctx a Cst.false_)) in
+      K.Thm.axiom ctx [] t
+
+    (* axiom: [| ¬¬a = a] *)
+    let ax_not_not_ =
+      let a = E.var ctx _var_a in
+      let t = E.(app_eq ctx (app ctx Cst.not_ (app ctx Cst.not_ a)) a) in
       K.Thm.axiom ctx [] t
 
     (* move conclusion to the left, to get a negated clause *)
@@ -193,6 +220,9 @@ module Make(A : ARG) : S = struct
       in
       {as_th=K.Thm.axiom ctx c_lits Cst.false_}
 
+    let iter_lits (self:t) : _ Iter.t =
+      K.Thm.hyps_iter self.as_th
+
     (* C1: G, a |- false
        C2: false |- a
        C3: G |- a=false (bool-eq-intro C1 C2)
@@ -200,22 +230,41 @@ module Make(A : ARG) : S = struct
        C5: |- (a=false) = ¬a (sym C4)
        C6: G |- ¬a (bool-eq C3 C5)
     *)
-    let move_lit_to_rhs_ (self:t) (e:E.t) : K.thm =
+    let move_lit_to_rhs (self:t) (e:E.t) : K.thm =
+      assert (iter_lits self |> Iter.exists (E.equal e));
       let th2 =
         K.Thm.subst ~recursive:false ctx ax_ex_falso
           (K.Subst.of_list [_var_a, e])
       in
-      let th3 = K.Thm.bool_eq_intro ctx self.as_th th2 in
+      let th3 = K.Thm.bool_eq_intro ctx th2 self.as_th in
       let th4 =
         K.Thm.subst ~recursive:false ctx ax_not_is_eq_false
           (K.Subst.of_list [_var_a, e])
         |> K.Thm.sym ctx
       in
-      K.Thm.bool_eq ctx th3 th4
+      let th = K.Thm.bool_eq ctx th3 th4 in
+      (* FIXME: if [concl th] is a double negation, remove it with ax_not_not_ *)
+      th
 
-    let move_lit_to_rhs (self:t) : K.thm =
+    let find_lit_by_term (self:t) (t: E.t) : (bool * E.t) option =
+      K.Thm.hyps_iter self.as_th
+      |> Iter.find_map
+        (fun e ->
+           if E.equal t e then Some (true, e)
+           else (
+             match open_not_ e with
+             | Some u when E.equal t u -> Some (false, e)
+             | _ -> None
+           ))
+
+    let find_uniq_lit self : _ option =
       match K.Thm.hyps_l self.as_th with
-      | [e] -> move_lit_to_rhs_ self e
+      | [e] -> Some e
+      | _ -> None
+
+    let move_uniq_lit_to_rhs (self:t) : K.thm =
+      match K.Thm.hyps_l self.as_th with
+      | [e] -> move_lit_to_rhs self e
       | _ ->
         errorf
           (fun k->k"n-clause.move_lit_to_rhs:@ expected single literal in %a" pp self)
@@ -343,7 +392,7 @@ module Make(A : ARG) : S = struct
         let ps =
           ps
           |> List.rev_map check_proof_rec_
-          |> List.rev_map N_clause.move_lit_to_rhs
+          |> List.rev_map N_clause.move_uniq_lit_to_rhs
         in
 
         let module CC = Trustee_core.Congruence_closure in
@@ -384,10 +433,15 @@ module Make(A : ARG) : S = struct
             errorf
               (fun k->k"cc-lemma: expected exactly one positive literal@ in %a" P.pp p)
           end
+
+      | P.Hres (init, steps) ->
+
+        let init = check_proof_rec_ init in
+        List.fold_left check_hres_step_ init steps
+
       | P.Assert_c _
         (* TODO: lookup in problem? *)
 
-      | P.Hres (_, _)
       | P.DT_isa_split (_, _)
       | P.DT_isa_disj (_, _, _)
       | P.DT_cstor_inj (_, _, _, _)
@@ -402,6 +456,112 @@ module Make(A : ARG) : S = struct
         Log.warn (fun k->k"unimplemented: checking %a" P.pp p);
         st.all_ok <- false;
         empty_clause_ax (* TODO *)
+    end
+
+  and check_hres_step_ (c1: N_clause.t) (step:P.hres_step) : N_clause.t =
+
+    (* do resolution between [c1] and [c2] *)
+    let res_on_ ~pivot c2 =
+      Log.debug (fun k->k "(@[resolve@ :c1 %a@ :c2 %a@ :pivot %a@])"
+                    N_clause.pp c1 N_clause.pp c2 E.pp pivot);
+      (* find the polarity of [pivot] in [c1] *)
+      match N_clause.find_lit_by_term c1 pivot with
+      | Some (false, lit) ->
+        (* C1: G1, ¬lit |- false
+           C2: G2, lit |- false
+           C3: G1 |- lit (from C1)
+           C4: G1, G2 |- false (res C2 C3) *)
+        let th3 = N_clause.move_lit_to_rhs c1 lit in
+        let th = K.Thm.cut ctx th3 (N_clause.as_th c2) in
+        N_clause.of_thm th
+
+      | Some (true, lit) ->
+        (* C1: G1, lit |- false
+           C2: G2, ¬lit |- false
+           C3: G2 |- lit (from C2)
+           C4: G1, G2 |- false (res C1 C3) *)
+        let th3 = N_clause.move_lit_to_rhs c2 lit in
+        let th = K.Thm.cut ctx (N_clause.as_th c1) th3 in
+        N_clause.of_thm th
+
+      | None ->
+        errorf (fun k->k"cannot resolve %a@ on pivot %a" N_clause.pp c1 E.pp pivot)
+    in
+
+    (* do bool paramodulation between [c1] and [c2],
+       where [c2] must contain [lhs = rhs] and [c1] must contain [lhs] *)
+    let bool_param_on_ ~lhs ~rhs c2 =
+      Log.debug (fun k->k "(@[bool-param@ :c1 %a@ :c2 %a@ :lhs `%a`@ :rhs `%a`@])"
+                    N_clause.pp c1 N_clause.pp c2 E.pp lhs E.pp rhs);
+      (* find if [c2] contains [lhs=rhs] or [rhs=lhs] *)
+      match
+        N_clause.iter_lits c2
+        |> Iter.find_map
+          (fun e ->
+             match open_not_ e with
+             | None -> None
+             | Some e' ->
+               match E.unfold_eq e' with
+               | Some (t1, t2) when E.equal t1 lhs && E.equal t2 rhs ->
+                 Some (e, true)
+               | Some (t1, t2) when E.equal t2 lhs && E.equal t1 rhs ->
+                 Some (e, false)
+               | _ -> None)
+      with
+      | Some (e, true) ->
+        let th1 = N_clause.move_lit_to_rhs c1 (E.app ctx Cst.not_ lhs) in
+        let th2 = N_clause.move_lit_to_rhs c2 e in
+        let th = K.Thm.bool_eq ctx th1 th2 in
+        N_clause.of_thm th
+
+      | Some (e, false) ->
+        (* same, but we need to apply symmetry on [c2] after moving
+           [rhs = lhs] to the right *)
+        let th1 = N_clause.move_lit_to_rhs c1 (E.app ctx Cst.not_ lhs) in
+        let th2 = K.Thm.sym ctx @@ N_clause.move_lit_to_rhs c2 e in
+        let th = K.Thm.bool_eq ctx th1 th2 in
+        N_clause.of_thm th
+
+      | None ->
+        errorf (fun k->k"cannot do unit-paramod on %a" N_clause.pp c2)
+    in
+
+    begin match step with
+      | P.R {pivot; p} ->
+        let pivot = conv_term pivot in
+        let c2 = check_proof_rec_ p in
+        res_on_ ~pivot c2
+
+      | P.R1 p ->
+        let c2 = check_proof_rec_ p in
+        let pivot = match N_clause.find_uniq_lit c2 with
+          | None -> errorf (fun k->k"r1: clause is not unit@ %a" N_clause.pp c2)
+          | Some t -> t
+        in
+        res_on_ ~pivot c2
+
+      | P.P { lhs; rhs; p } ->
+        let lhs = conv_term lhs in
+        let rhs = conv_term rhs in
+        let c2 = check_proof_rec_ p in
+        bool_param_on_ ~lhs ~rhs c2
+
+      | P.P1 p ->
+        let c2 = check_proof_rec_ p in
+        let fail() =
+          errorf (fun k->k"cannot do p1 on %a" N_clause.pp c2);
+        in
+        match N_clause.find_uniq_lit c2 with
+        | Some e ->
+          begin match open_not_ e with
+            | Some e' ->
+              begin match E.unfold_eq e' with
+                | Some (lhs, rhs) -> bool_param_on_ ~lhs ~rhs c2
+                | None -> fail()
+              end
+            | None -> fail()
+          end
+        | None -> fail()
     end
 
   and check_composite_step_ (step: Ast.Proof.composite_step) : N_clause.t option =

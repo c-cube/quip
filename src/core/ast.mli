@@ -75,7 +75,12 @@ type clause = Clause.t
 module Proof : sig
   type t [@@deriving show]
 
-  type hres_step [@@deriving show]
+  type hres_step =
+    | R of { pivot: term; p: t}
+    | R1 of t
+    | P of { lhs: term; rhs: term; p: t}
+    | P1 of t
+  [@@deriving show]
   (** hyper-resolution steps: resolution, unit resolution;
       bool paramodulation, unit bool paramodulation *)
 

@@ -86,10 +86,12 @@ module Make(A : ARG) : S = struct
   end
 
   (* turn [not e] into [Some e], any other term into [None] *)
-  let open_not_ (e:E.t) : E.t option =
+  let unfold_not_ (e:E.t) : E.t option =
     match E.view e with
     | E.E_app (f, u) when E.equal f Cst.not_ -> Some u
     | _ -> None
+
+  let is_not_ e = CCOpt.is_some (unfold_not_ e)
 
   (** {2 Negated form clause}
 
@@ -190,7 +192,7 @@ module Make(A : ARG) : S = struct
       let th =
         if E.equal concl Cst.false_ then th
         else (
-          match open_not_ concl with
+          match unfold_not_ concl with
           | None ->
             (* C1: G |- a
                C2: a, ¬a |- false (ax)
@@ -223,28 +225,39 @@ module Make(A : ARG) : S = struct
     let iter_lits (self:t) : _ Iter.t =
       K.Thm.hyps_iter self.as_th
 
-    (* C1: G, a |- false
-       C2: false |- a
-       C3: G |- a=false (bool-eq-intro C1 C2)
-       C4: |- ¬a = (a=false) (ax)
-       C5: |- (a=false) = ¬a (sym C4)
-       C6: G |- ¬a (bool-eq C3 C5)
+    (* goes from [G, ¬a |- false] to [G |- a].
+
+       C1: G, ¬a |- false
+       C2: false |- ¬a
+       C3: G |- ¬a=false (bool-eq-intro C1 C2)
+       C4: |- ¬¬a = (¬a=false) (ax subst with ¬a)
+       C5: |- (¬a=false) = ¬¬a (sym C4)
+       C6: G |- ¬¬a (bool-eq C3 C5)
+       C7: |- ¬¬a = a (ax)
+       C8: G |- a (bool-eq C6 C7)
     *)
     let move_lit_to_rhs (self:t) (e:E.t) : K.thm =
+      let a = match unfold_not_ e with
+        | Some a -> a
+        | None -> errorf (fun k->k"move_lit_to_rhs: expect a negation,@ got %a" E.pp e)
+      in
       assert (iter_lits self |> Iter.exists (E.equal e));
       let th2 =
         K.Thm.subst ~recursive:false ctx ax_ex_falso
           (K.Subst.of_list [_var_a, e])
       in
       let th3 = K.Thm.bool_eq_intro ctx th2 self.as_th in
-      let th4 =
+      let th5 =
         K.Thm.subst ~recursive:false ctx ax_not_is_eq_false
           (K.Subst.of_list [_var_a, e])
         |> K.Thm.sym ctx
       in
-      let th = K.Thm.bool_eq ctx th3 th4 in
-      (* FIXME: if [concl th] is a double negation, remove it with ax_not_not_ *)
-      th
+      let th6 = K.Thm.bool_eq ctx th3 th5 in
+      let th7 =
+        K.Thm.subst ctx ~recursive:false ax_not_not_
+          (K.Subst.of_list [_var_a, a]) in
+      let th8 = K.Thm.bool_eq ctx th6 th7 in
+      th8
 
     let find_lit_by_term (self:t) (t: E.t) : (bool * E.t) option =
       K.Thm.hyps_iter self.as_th
@@ -252,7 +265,7 @@ module Make(A : ARG) : S = struct
         (fun e ->
            if E.equal t e then Some (true, e)
            else (
-             match open_not_ e with
+             match unfold_not_ e with
              | Some u when E.equal t u -> Some (false, e)
              | _ -> None
            ))
@@ -485,7 +498,7 @@ module Make(A : ARG) : S = struct
         N_clause.of_thm th
 
       | None ->
-        errorf (fun k->k"cannot resolve %a@ on pivot %a" N_clause.pp c1 E.pp pivot)
+        errorf (fun k->k"cannot resolve %a@ on pivot `%a`" N_clause.pp c1 E.pp pivot)
     in
 
     (* do bool paramodulation between [c1] and [c2],
@@ -498,7 +511,7 @@ module Make(A : ARG) : S = struct
         N_clause.iter_lits c2
         |> Iter.find_map
           (fun e ->
-             match open_not_ e with
+             match unfold_not_ e with
              | None -> None
              | Some e' ->
                match E.unfold_eq e' with
@@ -553,7 +566,7 @@ module Make(A : ARG) : S = struct
         in
         match N_clause.find_uniq_lit c2 with
         | Some e ->
-          begin match open_not_ e with
+          begin match unfold_not_ e with
             | Some e' ->
               begin match E.unfold_eq e' with
                 | Some (lhs, rhs) -> bool_param_on_ ~lhs ~rhs c2

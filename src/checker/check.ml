@@ -192,23 +192,13 @@ module Make(A : ARG) : S = struct
       let th =
         if E.equal concl Cst.false_ then th
         else (
-          match unfold_not_ concl with
-          | None ->
-            (* C1: G |- a
-               C2: a, ¬a |- false (ax)
-               C3: G, ¬a |- false (cut C1 C2) *)
-            let ax_false =
-              K.Thm.subst ~recursive:false ctx ax_prove_false
-                (K.Subst.of_list [_var_a, concl]) in
-            K.Thm.cut ctx th ax_false
-          | Some u ->
-            (* C1: G |- ¬a
-               C2: a, ¬a |- false (ax)
-               C3: G, a |- false (cut C1 C2) *)
-            let ax_false =
-              K.Thm.subst ~recursive:false ctx ax_prove_false
-                (K.Subst.of_list [_var_a, u]) in
-            K.Thm.cut ctx th ax_false
+          (* C1: G |- a
+             C2: a, ¬a |- false (ax)
+             C3: G, ¬a |- false (cut C1 C2) *)
+          let ax_false =
+            K.Thm.subst ~recursive:false ctx ax_prove_false
+              (K.Subst.of_list [_var_a, concl]) in
+          K.Thm.cut ctx th ax_false
         )
       in
       {as_th=th}
@@ -586,17 +576,24 @@ module Make(A : ARG) : S = struct
 
     | P.S_step_c { name; res; proof } ->
 
+      Log.debug (fun k->k"check step '%s'" name);
       let c = check_proof_rec_ proof in
-      Hashtbl.add st.checked name c;
       Log.debug (fun k->k"step '%s'@ yields %a" name N_clause.pp c);
 
       let expected_res = conv_clause res in
 
-      if not (N_clause.equal_to_clause c expected_res) then (
-        Log.err (fun k->k"step '%s'@ should yield %a@ but proof returns %a"
-                    name Clause.pp expected_res N_clause.pp c);
-        st.all_ok <- false;
-      );
+      let c =
+        if N_clause.equal_to_clause c expected_res then c
+        else (
+          Log.err (fun k->k"step '%s'@ should yield %a@ but proof returns %a"
+                      name Clause.pp expected_res N_clause.pp c);
+          st.all_ok <- false;
+          (* use the expected clause instead *)
+          N_clause.of_clause_axiom expected_res
+        )
+      in
+
+      Hashtbl.add st.checked name c;
 
       Some c
    end

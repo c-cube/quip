@@ -7,6 +7,8 @@ open Common
 module Log = (val Logs.src_log (Logs.Src.create "quip.main"))
 
 let setup_log lvl : unit =
+  let quip_logger = Logger.create() in
+  Logger.log_to_chan quip_logger stdout;
   Trustee_core.Log.(
     let module Log = (val Logs.src_log (Logs.Src.create "trustee")) in
     set_level 50;
@@ -18,7 +20,7 @@ let setup_log lvl : unit =
         | 1 -> Log.info m
         | _ -> Log.debug m
     });
-  Logs.set_reporter (Logs.format_reporter ());
+  Logs.set_reporter (Logger.as_reporter quip_logger);
   Logs.set_level ~all:true (Some lvl)
 
 (* check proof for problem, then exits *)

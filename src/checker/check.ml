@@ -7,9 +7,14 @@ module Parsed_pb = Quip_core.Parsed_pb
 
 module Log = (val Logs.src_log (Logs.Src.create ~doc:"Proof checker" "quip.check"))
 
+type stats = {
+  n_valid: int;
+  n_invalid: int;
+  n_steps: int;
+} [@@deriving show {with_path=false}]
 
 module type S = sig
-  val check_proof : Ast.Proof.t -> bool
+  val check_proof : Ast.Proof.t -> bool * stats
 end
 
 type t = (module S)
@@ -276,13 +281,15 @@ module Make(A : ARG) : S = struct
   type st = {
     checked: (string, N_clause.t) Hashtbl.t;
     named_terms: (string, K.expr) Hashtbl.t;
-    mutable all_ok: bool;
+    mutable n_valid: int;
+    mutable n_invalid: int;
+    mutable n_steps: int;
   }
 
   let st : st = {
     checked = Hashtbl.create 32;
     named_terms = Hashtbl.create 32;
-    all_ok = true;
+    n_valid=0; n_invalid=0; n_steps=0;
   }
 
   let rec conv_term (t: Ast.term) : K.expr =
@@ -334,23 +341,42 @@ module Make(A : ARG) : S = struct
     Log.debug (fun k->k"checking step %a" Ast.Proof.pp_composite_step step);
     assert false (* TODO *)
 
+  (* check [p], returns its resulting clause.
+     In case of error this returns the empty clause. *)
+  and check_proof_or_empty_ p : N_clause.t =
+    st.n_steps <- 1 + st.n_steps;
+    try
+      let ok, c = check_proof_rec_exn p in
+      if ok then (
+        st.n_valid <- 1 + st.n_valid;
+      ) else (
+        st.n_invalid <- 1 + st.n_invalid;
+      );
+      c
+    with
+    | Error e ->
+      Log.err (fun k->k"proof failed with %s" e);
+      st.n_invalid <- 1 + st.n_invalid;
+      empty_clause_ax
+    | Trustee_error.E e ->
+      Log.err (fun k->k"proof failed with %a" Trustee_error.pp e);
+      st.n_invalid <- 1 + st.n_invalid;
+      empty_clause_ax
+
   (* check proof [p], returns the clause it returns *)
-  and check_proof_rec_ (p: Ast.Proof.t) : N_clause.t =
+  and check_proof_rec_exn (p: Ast.Proof.t) : bool * N_clause.t =
     Log.debug (fun k->k"(@[check-proof-rec@ %a@])" P.pp p);
     begin match P.view p with
       | P.Sorry ->
         (* return `|- false` by default, we do not know what else to return *)
-        Log.warn (fun k->k"met a sorry step");
-        st.all_ok <- false;
-        empty_clause_ax (* yikes *)
+        false, empty_clause_ax
 
       | P.Sorry_c c ->
-        st.all_ok <- false;
-        conv_clause c |> N_clause.of_clause_axiom
+        false, conv_clause c |> N_clause.of_clause_axiom
 
       | P.Refl t ->
         let t = conv_term t in
-        N_clause.of_thm (K.Thm.refl ctx t)
+        true, N_clause.of_thm (K.Thm.refl ctx t)
 
       | P.Assert t ->
         Log.warn (fun k->k"TODO: find assert in assumptions");
@@ -359,7 +385,7 @@ module Make(A : ARG) : S = struct
 
         (* assume: [¬t \/ t] *)
         let t = conv_term t in
-        N_clause.of_thm (K.Thm.axiom ctx [] t)
+        true, N_clause.of_thm (K.Thm.axiom ctx [] t)
 
       | P.Composite {assumptions; steps} ->
         (* composite proof: check each step *)
@@ -376,12 +402,12 @@ module Make(A : ARG) : S = struct
         in
         begin match r with
           | None -> errorf (fun k->k"composite proof returns no clause")
-          | Some c -> c
+          | Some c -> true, c
         end
 
       | P.Named name ->
         begin match Hashtbl.find_opt st.checked name with
-          | Some c -> c
+          | Some c -> true, c
           | None ->
             errorf (fun k->k"cannot find step with name '%s'" name)
         end
@@ -394,7 +420,7 @@ module Make(A : ARG) : S = struct
         (* check sub-proofs, and turn them into positive equations *)
         let ps =
           ps
-          |> List.rev_map check_proof_rec_
+          |> List.rev_map check_proof_or_empty_
           |> List.rev_map N_clause.move_uniq_lit_to_rhs
         in
 
@@ -403,7 +429,7 @@ module Make(A : ARG) : S = struct
           | None ->
             errorf (fun k->k"failed to prove CC-lemma@ %a" P.pp p)
           | Some thm ->
-            N_clause.of_thm thm
+            true, N_clause.of_thm thm
         end
 
       | P.CC_lemma c ->
@@ -430,7 +456,7 @@ module Make(A : ARG) : S = struct
               | None ->
                 errorf (fun k->k"failed to prove CC-lemma@ %a" P.pp p)
               | Some thm ->
-                N_clause.of_thm thm
+                true, N_clause.of_thm thm
             end
           | _ ->
             errorf
@@ -439,8 +465,9 @@ module Make(A : ARG) : S = struct
 
       | P.Hres (init, steps) ->
 
-        let init = check_proof_rec_ init in
-        List.fold_left check_hres_step_ init steps
+        let init = check_proof_or_empty_ init in
+        let c = List.fold_left check_hres_step_ init steps in
+        true, c
 
       | P.Assert_c _
         (* TODO: lookup in problem? *)
@@ -457,8 +484,7 @@ module Make(A : ARG) : S = struct
       | P.LRA _
         ->
         Log.warn (fun k->k"unimplemented: checking %a" P.pp p);
-        st.all_ok <- false;
-        empty_clause_ax (* TODO *)
+        false, empty_clause_ax (* TODO *)
     end
 
   and check_hres_step_ (c1: N_clause.t) (step:P.hres_step) : N_clause.t =
@@ -532,11 +558,11 @@ module Make(A : ARG) : S = struct
     begin match step with
       | P.R {pivot; p} ->
         let pivot = conv_term pivot in
-        let c2 = check_proof_rec_ p in
+        let c2 = check_proof_or_empty_ p in
         res_on_ ~pivot c2
 
       | P.R1 p ->
-        let c2 = check_proof_rec_ p in
+        let c2 = check_proof_or_empty_ p in
         let pivot = match N_clause.find_uniq_lit c2 with
           | None -> errorf (fun k->k"r1: clause is not unit@ %a" N_clause.pp c2)
           | Some t -> t
@@ -546,11 +572,11 @@ module Make(A : ARG) : S = struct
       | P.P { lhs; rhs; p } ->
         let lhs = conv_term lhs in
         let rhs = conv_term rhs in
-        let c2 = check_proof_rec_ p in
+        let c2 = check_proof_or_empty_ p in
         bool_param_on_ ~lhs ~rhs c2
 
       | P.P1 p ->
-        let c2 = check_proof_rec_ p in
+        let c2 = check_proof_or_empty_ p in
         let fail() =
           errorf (fun k->k"cannot do p1 on %a" N_clause.pp c2);
         in
@@ -576,8 +602,8 @@ module Make(A : ARG) : S = struct
 
     | P.S_step_c { name; res; proof } ->
 
-      Log.debug (fun k->k"check step '%s'" name);
-      let c = check_proof_rec_ proof in
+      Log.info (fun k->k"check step '%s'" name);
+      let c = check_proof_or_empty_ proof in
       Log.debug (fun k->k"step '%s'@ yields %a" name N_clause.pp c);
 
       let expected_res = conv_clause res in
@@ -587,7 +613,7 @@ module Make(A : ARG) : S = struct
         else (
           Log.err (fun k->k"step '%s'@ should yield %a@ but proof returns %a"
                       name Clause.pp expected_res N_clause.pp c);
-          st.all_ok <- false;
+          st.n_invalid <- 1 + st.n_invalid;
           (* use the expected clause instead *)
           N_clause.of_clause_axiom expected_res
         )
@@ -600,15 +626,16 @@ module Make(A : ARG) : S = struct
 
   let check_proof p =
     Log.debug (fun k->k"checking proof");
-    let _c = check_proof_rec_ p in
+    let _c = check_proof_or_empty_ p in
     (* TODO: should it return the empty clause? *)
-    st.all_ok
+    let ok = st.n_invalid=0 in
+    ok, {n_invalid=st.n_invalid; n_valid=st.n_valid; n_steps=st.n_steps}
 end
 
 let create ctx pb : t =
   let module M = Make(struct let ctx=ctx let problem=pb end) in
   (module M)
 
-let check_proof (self: t) (p: Ast.Proof.t) : bool =
+let check_proof (self: t) (p: Ast.Proof.t) : bool * stats =
   let (module Self) = self in
   Self.check_proof p

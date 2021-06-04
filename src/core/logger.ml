@@ -10,6 +10,7 @@ type t = {
 let create () : t =
   let buf = Buffer.create 128 in
   let fmt = Format.formatter_of_buffer buf in
+  Fmt.set_color_tag_handling fmt;
   { buf; fmt; chans=[]; }
 
 let log_to_chan self oc : unit =
@@ -21,11 +22,18 @@ let as_reporter self : Logs.reporter =
     List.iter
       (fun oc -> output_string oc s; flush oc) self.chans
   in
+  let pp_level_ out = function
+    | Logs.Debug -> Fmt.fprintf out "@{<bold>debug@}"
+    | Logs.Info -> Fmt.fprintf out "@{<Blue>INFO@}"
+    | Logs.App -> Fmt.fprintf out "app"
+    | Logs.Error -> Fmt.fprintf out "@{<Red>ERROR@}"
+    | Logs.Warning -> Fmt.fprintf out "@{<Yellow>WARN@}"
+  in
   { Logs.report =
       fun src lvl ~over k msg ->
         if self.chans <> [] then (
           Buffer.clear self.buf;
-          Fmt.fprintf self.fmt "(@[%s[%a" (Logs.Src.name src) Logs.pp_level lvl;
+          Fmt.fprintf self.fmt "(@[%a[%s" pp_level_ lvl (Logs.Src.name src);
           msg (fun ?header ?(tags=Logs.Tag.empty) fmt ->
               CCOpt.iter (fun s -> Fmt.fprintf self.fmt ",%s" s) header;
               if not (Logs.Tag.is_empty tags) then Logs.Tag.pp_set self.fmt tags;

@@ -38,7 +38,8 @@ let main ~quiet ~problem proof : 'a =
   let checker = Quip_check.Check.create ctx problem in
 
   Fmt.printf "checking proof…@.";
-  let proof_valid = Quip_check.Check.check_proof checker proof in
+  let proof_valid, stats = Quip_check.Check.check_proof checker proof in
+  Fmt.printf "; @[<h>%a@]@." Quip_check.Check.pp_stats stats;
   if proof_valid then (
     Fmt.printf "@{<Green>OK@}@.";
   ) else (

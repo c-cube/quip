@@ -166,9 +166,24 @@ module Proof = struct
       let cl = cl_of_sexp cl in
       P.cc_lemma cl
 
-    | List [{s=Atom "bool-c";_}; cl] ->
+    | List [{s=Atom "bool-c";_}; {s=Atom name;_} as s_name; cl] ->
+      let name = P.(match name with
+        | "and-i" -> And_i
+        | "and-e" -> And_e
+        | "or-i" -> Or_i
+        | "or-e" -> Or_e
+        | "not-i" -> Not_i
+        | "not-e" -> Not_e
+        | "imp-i" -> Imp_i
+        | "imp-e" -> Imp_e
+        | "xor-i" -> Xor_i
+        | "xor-e" -> Xor_e
+        | "eq-i" -> Eq_i
+        | "eq-e" -> Eq_e
+        | _ -> parse_errorf s_name "unknown bool-c rule: '%s'" name
+      ) in
       let cl = cl_of_sexp cl in
-      P.bool_c cl
+      P.bool_c name cl
 
     | List ({s=Atom "hres";_} ::
             {s=List [{s=Atom "init";_}; init];_} :: steps) ->

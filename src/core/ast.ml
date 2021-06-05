@@ -125,7 +125,7 @@ module Proof = struct
     | Bool_true_is_true
     | Bool_true_neq_false
     | Bool_eq of term * term (* equal by pure boolean reasoning *)
-    | Bool_c of clause (* boolean tautology *)
+    | Bool_c of bool_c_name * clause (* boolean tautology *)
     | Ite_true of term (* given [if a b c] returns [a=T |- if a b c=b] *)
     | Ite_false of term
     | LRA of clause
@@ -134,6 +134,21 @@ module Proof = struct
         assumptions: (string * lit) list;
         steps: composite_step array; (* last step is the proof *)
       }
+  [@@deriving show {with_path=false}]
+
+  and bool_c_name =
+    | And_i
+    | And_e
+    | Or_i
+    | Or_e
+    | Not_i
+    | Not_e
+    | Imp_i
+    | Imp_e
+    | Eq_i
+    | Eq_e
+    | Xor_i
+    | Xor_e
   [@@deriving show {with_path=false}]
 
   and t=view
@@ -201,7 +216,7 @@ module Proof = struct
   let true_is_true : t = Bool_true_is_true
   let true_neq_false : t = Bool_true_neq_false
   let bool_eq a b : t = Bool_eq (a,b)
-  let bool_c c : t = Bool_c c
+  let bool_c name c : t = Bool_c (name, c)
 
   let hres_l c l : t = Hres (c,l)
 
@@ -234,7 +249,7 @@ module Proof = struct
     | DT_cstor_inj (_, _c, ts, us) -> List.iter f_t ts; List.iter f_t us
     | Bool_true_is_true | Bool_true_neq_false -> ()
     | Bool_eq (t, u) -> f_t t; f_t u
-    | Bool_c c -> f_clause c
+    | Bool_c (_,c) -> f_clause c
     | Ite_true t | Ite_false t -> f_t t
     | LRA c -> f_clause c
     | Composite { assumptions; steps } ->

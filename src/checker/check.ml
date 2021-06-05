@@ -94,6 +94,11 @@ module Make(A : ARG) : S = struct
         or [None] *)
 
     val of_thm : K.thm -> t
+    (** Turn a theorem into a (Horn) clause. *)
+
+    val as_singleton : t -> Lit.t option
+    (** [as_singleton (singleton lit)] is [Some lit]. For non unary
+        clauses it returns [None]. *)
 
     val uniq_pos_lit : t -> Lit.t option
     (** [uniq_pos_lit c] returns the unique positive literal of [c] if
@@ -118,6 +123,10 @@ module Make(A : ARG) : S = struct
     let remove = LSet.remove
     let lits = LSet.elements
     let union = LSet.union
+    let as_singleton self = match LSet.choose_opt self with
+      | Some lit ->
+        if LSet.is_empty (LSet.remove lit self) then Some lit else None
+      | None -> None
     let iter_lits self k = LSet.iter k self
 
     let find_lit_by_term e (self:t) : Lit.t option =
@@ -636,7 +645,7 @@ module Make(A : ARG) : S = struct
 
       | P.R1 p ->
         let c2 = check_proof_or_empty_ p in
-        let pivot = match Clause.uniq_pos_lit c2 with
+        let pivot = match Clause.as_singleton c2 with
           | None ->
             errorf (fun k->k"r1: clause `%a`@ does not have a unique positive literal"
                        Clause.pp c2)

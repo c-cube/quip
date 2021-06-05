@@ -193,6 +193,9 @@ module Proof = struct
     | List [{s=Atom "assert";_}; t] ->
       P.assertion (t_of_sexp t)
 
+    | List [{s=Atom "assert-c";_}; c] ->
+      P.assertion_c (cl_of_sexp c)
+
     | List [{s=Atom "refl";_}; t] ->
       P.refl (t_of_sexp t)
 

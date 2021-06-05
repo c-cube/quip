@@ -20,7 +20,7 @@ module Smtlib = struct
 
   type env = {
     ctx: K.ctx [@opaque];
-    consts: (string, K.const [@printer K.Const.pp]) tbl;
+    consts: (string, (K.const [@printer K.Const.pp]) * Builtin.t option) tbl;
     ty_consts: (string, K.ty_const [@printer K.Const.pp]) tbl;
     named_terms: (string, K.Expr.t) tbl;
     builtins: (K.const [@printer K.Const.pp]) Builtin.Tbl.t;
@@ -43,10 +43,10 @@ module Smtlib = struct
       Hashtbl.add self.ty_consts "Bool" (K.Const.bool ctx);
       let (@->) a b = E.arrow_l ctx a b in
       let addc s b c =
-        Hashtbl.add self.consts s c;
+        Hashtbl.add self.consts s (c,Some b);
         Builtin.Tbl.add self.builtins b c;
       and addtyc s b c =
-        Hashtbl.add self.ty_consts s c;
+        Hashtbl.add self.ty_consts s c; (* TODO: also remember builtin *)
         Builtin.Tbl.add self.builtins b c;
       in
       let mkc s b ty =
@@ -92,8 +92,15 @@ module Smtlib = struct
       with Not_found -> errorf "unknown constant '%s'" c
     in
     let app_str c l =
-      let c = find_const_ c in
-      E.app_l self.ctx (E.const self.ctx c[]) l
+      let c, _is_b = find_const_ c in
+      match _is_b, l with
+      | Some b, a::tl when Builtin.is_assoc b ->
+        List.fold_left
+          (fun acc e ->
+             E.app_l self.ctx (E.const self.ctx c[]) [acc; e])
+          a tl
+      | _ ->
+        E.app_l self.ctx (E.const self.ctx c[]) l
     in
 
     (* apply an associative operator to a list *)
@@ -112,13 +119,13 @@ module Smtlib = struct
       match e with
       | SA.Eq (a,b) -> E.app_eq self.ctx (loop' a) (loop' b)
       | SA.True ->
-        E.const self.ctx (Hashtbl.find self.consts "true") []
+        E.const self.ctx (fst @@ Hashtbl.find self.consts "true") []
       | SA.False ->
-        E.const self.ctx (Hashtbl.find self.consts "false") []
+        E.const self.ctx (fst @@ Hashtbl.find self.consts "false") []
       | SA.Const c when Str_map.mem c subst ->
         Str_map.find c subst
       | SA.Const c ->
-        let c = find_const_ c in
+        let c, _ = find_const_ c in
         E.const self.ctx c []
       | SA.App (f, l) ->
         app_str f (List.map loop' l)
@@ -168,7 +175,7 @@ module Smtlib = struct
         in
         let c = E.new_const self.ctx fun_name ty_vars ty in
         Log.debug (fun k->k"(@[declare-const@ %a@])" K.Const.pp c);
-        Hashtbl.replace self.consts fun_name c
+        Hashtbl.replace self.consts fun_name (c, None)
 
       | SA.Stmt_assert t ->
         let t = conv_expr self t in

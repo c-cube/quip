@@ -13,6 +13,12 @@ type t =
 
 let hash (x:t) : int = CCHash.int (to_enum x)
 
+(** [is_assoc b] returns [true] iff [b] is an associative function symbol,
+    which enables the syntax [b t1…tn] as a shortcut for [(((b t1 t2) t3) …) tn] *)
+let is_assoc = function
+  | And | Or | Imply -> true
+  | True | False | Not | Xor | Eq | Bool -> false
+
 module As_key = struct
   type nonrec t = t
   let equal = equal

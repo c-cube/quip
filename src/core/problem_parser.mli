@@ -11,6 +11,8 @@ module Smtlib : sig
   val parse_file_exn : K.ctx -> string -> pb
 end
 
+(* TODO: parse .cnf files *)
+
 val parse_file : K.ctx -> string -> (pb, string) result
 (** Parse a file, guessing the format based on its extension *)
 

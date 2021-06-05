@@ -371,6 +371,19 @@ module Make(A : ARG) : S = struct
           | T.Var {name="=";_}, [a;b] ->
             (* special case so we handle the polymorphism directly *)
             K.Expr.app_l ctx (K.Expr.eq ctx (K.Expr.ty_exn a)) [a; b]
+          | T.Var {name;_}, l ->
+            begin match Problem.find_const_by_name name, l with
+              | Some (c, Some b), e1 :: tl
+                when Quip_core.Builtin.is_assoc b ->
+                (* associative operator *)
+                List.fold_left
+                  (fun e1 e2 -> K.Expr.app_l ctx (K.Expr.const ctx c []) [e1;e2])
+                  e1 tl
+
+              | _ ->
+               let f = conv_term f in
+               K.Expr.app_l ctx f l
+            end
           | _ ->
             let f = conv_term f in
             K.Expr.app_l ctx f l
@@ -380,7 +393,7 @@ module Make(A : ARG) : S = struct
           | Some u -> u
           | None ->
             begin match Problem.find_const_by_name v.name with
-              | Some c -> K.Expr.const ctx c []
+              | Some (c,_) -> K.Expr.const ctx c []
               | None ->
                 errorf(fun k->k"cannot convert unknown term@ `%a`" T.pp t)
             end

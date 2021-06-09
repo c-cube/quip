@@ -509,44 +509,6 @@ module Make(A : ARG) : S = struct
 
   module P = Ast.Proof
 
-  (** tiny query language for examining clauses *)
-  module Q_lang : sig
-    type ('i, 'a) t
-    val lit : (Clause.t, Lit.t) t
-    val pos_lit : (Clause.t, K.expr) t
-    val neg_lit : (Clause.t, K.expr) t
-    val map : ('a -> 'b) -> ('i, 'a) t -> ('i, 'b) t
-    val filter_map : ('a -> 'b option) -> ('i, 'a) t -> ('i, 'b) t
-    val flat_map : ('a -> ('i, 'b) t) -> ('i, 'a) t -> ('i, 'b) t
-    val builtin : Quip_core.Builtin.t -> (K.expr, K.expr list) t
-    val builtin1 : Quip_core.Builtin.t -> (K.expr, K.expr) t
-    val builtin2 : Quip_core.Builtin.t -> (K.expr, K.expr * K.expr) t
-    val run : (Clause.t, 'a) t -> Clause.t -> 'a Iter.t
-  end = struct
-    type ('i, 'a) t = 'i -> 'a Iter.t
-    let lit c = Clause.to_iter c
-    let return x _c = Iter.return x
-    let empty _c = Iter.empty
-    let map f e c = e c |> Iter.map f
-    let flat_map (f:_ -> _ t) (e:_ t) i k = e i (fun x -> let e' = f x in e' i k)
-    let filter_map f e c = e c |> Iter.filter_map f
-    let pos_lit c =
-      lit c |>
-      Iter.filter_map (fun lit -> if Lit.sign lit then Some (Lit.atom lit) else None)
-    let neg_lit c =
-      lit c |>
-      Iter.filter_map (fun lit -> if Lit.sign lit then None else Some (Lit.atom lit))
-    let builtin b e =
-      match unfold_builtin b e with
-      | Some args -> Iter.return args
-      | None -> Iter.empty
-    let builtin1 b i =
-      builtin b i |> Iter.filter_map (function [x] -> Some x | _ -> None)
-    let builtin2 b i =
-      builtin b i |> Iter.filter_map (function [x;y] -> Some (x,y) | _ -> None)
-    let run (self:_ t) c = self c
-  end
-
   let rec check_step (_self:t) (step: Ast.Proof.composite_step) : unit =
     Log.debug (fun k->k"checking step %a" Ast.Proof.pp_composite_step step);
     assert false (* TODO *)
@@ -729,23 +691,12 @@ module Make(A : ARG) : S = struct
     let module B = Quip_core.Builtin in
     let c = conv_clause c in
 
-    (* TODO:
-       - in clause, have {pos: E.Set.t; neg: E.Set.t}
-       - in clause, provide lits, lits_pos, lits_neg iterators
-       - provide Q_lang.builtin{,1,2} functions
-         like `builtin -> expr -> expr list option` so we can
-         easily compose stuff with Iter
-
-       - use Iter and Iter.head to query a clause for And_i, Or_e, etc.
-       *)
-
-    (* TODO: use Q_lang *)
     begin match name with
       | P.And_i ->
         (* [¬a1 \/ ¬a2 \/ … \/ (and a1...an)] *)
 
-        let open CCOpt.Infix in
         begin
+          let open CCOpt.Infix in
           match
             let* pos = Clause.uniq_pos_lit c in
             let* args = unfold_builtin B.And (Lit.atom pos) in
@@ -763,18 +714,62 @@ module Make(A : ARG) : S = struct
         end
 
       | P.And_e ->
-        (* TODO
-        let neg =
-          Clause.uniq_neg_lit c |> unwrap_ "cannot find unique negative lit" in
-        let args = unfold_builtin B.And (Lit.atom neg) in
-        (* TODO also get unique pos, and check it's in args, and return
-           the clause *)
-        Log.debug (fun k->k"and-e: args = %a" Fmt.(Dump.list E.pp) args);
-           *)
-        false, c (* TODO *)
+        (* [¬(and a1…an  \/ a_i] *)
 
-      | P.Or_i
-      | P.Or_e
+        begin
+          let open CCOpt.Infix in
+          match
+            let* pos = Clause.uniq_pos_lit c in
+            let* neg = Clause.uniq_neg_lit c in
+            let* args = unfold_builtin B.And (Lit.atom neg) in
+            let ok = CCList.mem ~eq:E.equal (Lit.atom pos) args in
+            Some (ok, c)
+          with
+          | Some tup -> tup
+          | None ->
+            Log.err (fun k->k"cannot check and-e %a" Clause.pp c);
+            false, c
+        end
+
+      | P.Or_i ->
+        (* [¬a \/ (or a1…an)] *)
+
+        begin
+          let open CCOpt.Infix in
+          match
+            let* pos = Clause.uniq_pos_lit c in
+            let* neg = Clause.uniq_neg_lit c in
+            let* args = unfold_builtin B.Or (Lit.atom pos) in
+            let ok = CCList.mem ~eq:E.equal (Lit.atom neg) args in
+            Some (ok, c)
+          with
+          | Some r -> r
+          | None ->
+            Log.err (fun k->k"cannot check or-i %a" Clause.pp c);
+            false, c
+        end
+
+      | P.Or_e ->
+        (* [¬(or a1…an) \/ a1 \/ … \/ an] *)
+
+        begin
+          let open CCOpt.Infix in
+          match
+            let* neg = Clause.uniq_neg_lit c in
+            let* args = unfold_builtin B.Or (Lit.atom neg) in
+            let c' =
+              Clause.of_list (neg :: List.map (fun a -> Lit.make ~sign:true a) args)
+            in
+            Some c'
+          with
+          | Some c' ->
+            let ok = Clause.equal c c' in
+            ok, c'
+          | None ->
+            Log.err (fun k->k"cannot check or-e %a" Clause.pp c);
+            false, c
+        end
+
       | P.Not_i
       | P.Not_e
       | P.Imp_i

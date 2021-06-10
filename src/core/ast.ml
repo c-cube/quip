@@ -125,7 +125,8 @@ module Proof = struct
     | Bool_true_is_true
     | Bool_true_neq_false
     | Bool_eq of term * term (* equal by pure boolean reasoning *)
-    | Bool_c of bool_c_name * clause (* boolean tautology *)
+    | Bool_c of bool_c_name * term list (* boolean tautology *)
+    | Nn of t
     | Ite_true of term (* given [if a b c] returns [a=T |- if a b c=b] *)
     | Ite_false of term
     | LRA of clause
@@ -217,6 +218,7 @@ module Proof = struct
   let true_neq_false : t = Bool_true_neq_false
   let bool_eq a b : t = Bool_eq (a,b)
   let bool_c name c : t = Bool_c (name, c)
+  let nn p : t = Nn p
 
   let hres_l c l : t = Hres (c,l)
 
@@ -249,7 +251,8 @@ module Proof = struct
     | DT_cstor_inj (_, _c, ts, us) -> List.iter f_t ts; List.iter f_t us
     | Bool_true_is_true | Bool_true_neq_false -> ()
     | Bool_eq (t, u) -> f_t t; f_t u
-    | Bool_c (_,c) -> f_clause c
+    | Bool_c (_, ts) -> List.iter f_t ts
+    | Nn p -> f_p p
     | Ite_true t | Ite_false t -> f_t t
     | LRA c -> f_clause c
     | Composite { assumptions; steps } ->

@@ -124,7 +124,8 @@ module Proof : sig
     | Bool_true_is_true
     | Bool_true_neq_false
     | Bool_eq of term * term (* equal by pure boolean reasoning *)
-    | Bool_c of bool_c_name * clause (* boolean tautology *)
+    | Bool_c of bool_c_name * term list (* boolean tautology *)
+    | Nn of t
     | Ite_true of term (* given [if a b c] returns [a=T |- if a b c=b] *)
     | Ite_false of term
     | LRA of clause
@@ -177,7 +178,8 @@ module Proof : sig
   val cstor_inj : Name.t -> int -> term list -> term list -> t
 
   val bool_eq : term -> term -> t
-  val bool_c : bool_c_name -> lit list -> t
+  val bool_c : bool_c_name -> term list -> t
+  val nn : t -> t
   val ite_true : term -> t
   val ite_false : term -> t
 

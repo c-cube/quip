@@ -166,7 +166,12 @@ module Proof = struct
       let cl = cl_of_sexp cl in
       P.cc_lemma cl
 
-    | List [{s=Atom "bool-c";_}; {s=Atom name;_} as s_name; cl] ->
+    | List [{s=Atom "nn";_}; p] ->
+      let p = p_of_sexp p in
+      P.nn p
+
+    | List ({s=Atom "bool-c";_} :: ({s=Atom name;_} as s_name) :: ts) ->
+      let ts = List.map t_of_sexp ts in
       let name = P.(match name with
         | "and-i" -> And_i
         | "and-e" -> And_e
@@ -182,8 +187,7 @@ module Proof = struct
         | "eq-e" -> Eq_e
         | _ -> parse_errorf s_name "unknown bool-c rule: '%s'" name
       ) in
-      let cl = cl_of_sexp cl in
-      P.bool_c name cl
+      P.bool_c name ts
 
     | List ({s=Atom "hres";_} ::
             {s=List [{s=Atom "init";_}; init];_} :: steps) ->

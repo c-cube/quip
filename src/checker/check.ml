@@ -54,7 +54,7 @@ module Make(A : ARG) : S = struct
     val sign : t -> bool
     val atom : t -> E.t
     val to_expr : t -> E.t
-    val make : ?sign:bool -> E.t -> t
+    val make : bool -> E.t -> t
   end = struct
     type t = {
       sign: bool;
@@ -68,7 +68,7 @@ module Make(A : ARG) : S = struct
 
     let[@inline] sign self = self.sign
     let[@inline] atom self = self.expr
-    let make ?(sign=true) expr = {sign;expr}
+    let[@inline] make sign expr = {sign;expr}
     let[@inline] neg (self:t) : t = {self with sign=not self.sign}
 
     let to_expr (self:t) : K.expr =
@@ -81,6 +81,7 @@ module Make(A : ARG) : S = struct
     type t [@@deriving show, ord, eq]
     val empty : t
     val of_list : Lit.t list -> t
+    val of_iter : Lit.t Iter.t -> t
     val add : Lit.t -> t -> t
     val singleton : Lit.t -> t
     val remove : Lit.t -> t -> t
@@ -122,8 +123,8 @@ module Make(A : ARG) : S = struct
       pos: ESet.t;
     } [@@deriving eq, ord]
     let lits self k =
-      ESet.iter (fun t -> k (Lit.make ~sign:false t)) self.neg;
-      ESet.iter (fun t -> k (Lit.make ~sign:true t)) self.pos
+      ESet.iter (fun t -> k (Lit.make false t)) self.neg;
+      ESet.iter (fun t -> k (Lit.make true t)) self.pos
 
     let pp out self =
       Fmt.fprintf out "(@[cl@ %a@])" (Fmt.iter Lit.pp) (lits self)
@@ -153,6 +154,7 @@ module Make(A : ARG) : S = struct
     let add' s x = add x s
 
     let of_list = List.fold_left add' empty
+    let of_iter = Iter.fold add' empty
 
     let subset c1 c2 = ESet.subset c1.pos c2.pos && ESet.subset c1.neg c2.neg
 
@@ -174,41 +176,41 @@ module Make(A : ARG) : S = struct
     let as_singleton self =
       match ESet.is_empty self.neg, ESet.is_empty self.pos with
       | true, false ->
-        as_singleton_e_ self.pos |> CCOpt.map (Lit.make ~sign:true)
+        as_singleton_e_ self.pos |> CCOpt.map (Lit.make true)
       | false, true ->
-        as_singleton_e_ self.neg |> CCOpt.map (Lit.make ~sign:false)
+        as_singleton_e_ self.neg |> CCOpt.map (Lit.make false)
       | _ -> None
 
     let to_iter = lits
 
     let pos_lits self =
-      ESet.to_iter self.pos |> Iter.map (Lit.make ~sign:true)
+      ESet.to_iter self.pos |> Iter.map (Lit.make true)
 
     let neg_lits self =
-      ESet.to_iter self.neg |> Iter.map (Lit.make ~sign:false)
+      ESet.to_iter self.neg |> Iter.map (Lit.make false)
 
     let pos_lits_list self = pos_lits self |> Iter.to_rev_list
     let neg_lits_list self = neg_lits self |> Iter.to_rev_list
 
     let find_lit_by_term e (self:t) : Lit.t option =
-      if ESet.mem e self.pos then Some (Lit.make ~sign:true e)
-      else if ESet.mem e self.neg then Some (Lit.make ~sign:false e)
+      if ESet.mem e self.pos then Some (Lit.make true e)
+      else if ESet.mem e self.neg then Some (Lit.make false e)
       else None
 
     let uniq_lit_of_sign_ sign self =
       if sign
-      then as_singleton_e_ self.pos |> CCOpt.map (Lit.make ~sign:true)
-      else as_singleton_e_ self.neg |> CCOpt.map (Lit.make ~sign:false)
+      then as_singleton_e_ self.pos |> CCOpt.map (Lit.make true)
+      else as_singleton_e_ self.neg |> CCOpt.map (Lit.make false)
 
     let uniq_pos_lit self = uniq_lit_of_sign_ true self
     let uniq_neg_lit self = uniq_lit_of_sign_ false self
 
     let of_thm th =
       let concl = K.Thm.concl th in
-      let c = singleton (Lit.make concl) in
+      let c = singleton (Lit.make true concl) in
       Iter.fold
         (fun c t ->
-           let lit = Lit.make ~sign:false t in
+           let lit = Lit.make false t in
            add lit c)
         c
         (K.Thm.hyps_iter th)
@@ -498,7 +500,7 @@ module Make(A : ARG) : S = struct
 
   let conv_lit (lit: Ast.lit) : Lit.t =
     let {Ast.Lit.sign; atom} = lit in
-    Lit.make ~sign (conv_term atom)
+    Lit.make sign (conv_term atom)
 
   let conv_clause (c: Ast.clause) : Clause.t =
     Log.debug (fun k->k"conv-clause %a" Ast.Clause.pp c);
@@ -529,7 +531,7 @@ module Make(A : ARG) : S = struct
     | Error e ->
       Log.err (fun k->k"proof failed with %s" e);
       st.n_invalid <- 1 + st.n_invalid;
-      Clause.empty 
+      Clause.empty
     | Trustee_error.E e ->
       Log.err (fun k->k"proof failed with %a" Trustee_error.pp e);
       st.n_invalid <- 1 + st.n_invalid;
@@ -557,7 +559,7 @@ module Make(A : ARG) : S = struct
 
         (* assume: [¬t \/ t] *)
         let t = conv_term t in
-        true, Clause.singleton (Lit.make t)
+        true, Clause.singleton (Lit.make true t)
 
       | P.Assert_c c ->
         (* FIXME: lookup in problem? *)
@@ -670,8 +672,22 @@ module Make(A : ARG) : S = struct
         let c = List.fold_left check_hres_step_ init steps in
         true, c
 
-      | P.Bool_c (name, c) ->
-        check_bool_c name c
+      | P.Bool_c (name, ts) ->
+        let ts = List.map conv_term ts in
+        check_bool_c p name ts
+
+      | P.Nn p ->
+        let c = check_proof_or_empty_ p in
+        let c =
+          Clause.lits c
+          |> Iter.map (fun lit ->
+              match unfold_not_ (Lit.atom lit) with
+              | Some u -> Lit.make (not (Lit.sign lit)) u
+              | None -> lit)
+          |> Clause.of_iter
+        in
+        true, c
+
 
       | P.DT_isa_split (_, _)
       | P.DT_isa_disj (_, _, _)
@@ -687,9 +703,11 @@ module Make(A : ARG) : S = struct
         false, Clause.empty (* TODO *)
     end
 
-  and check_bool_c name c : bool * Clause.t =
+  and check_bool_c p name (ts:K.expr list) : bool * Clause.t =
     let module B = Quip_core.Builtin in
-    let c = conv_clause c in
+
+    let get1 = function [t] -> Some t | _ -> None in
+    let get2 = function [t;u] -> Some (t,u) | _ -> None in
 
     begin match name with
       | P.And_i ->
@@ -698,19 +716,18 @@ module Make(A : ARG) : S = struct
         begin
           let open CCOpt.Infix in
           match
-            let* pos = Clause.uniq_pos_lit c in
-            let* args = unfold_builtin B.And (Lit.atom pos) in
-            let c' =
-              Clause.of_list (pos :: List.map (fun a -> Lit.make ~sign:false a) args)
+            let* and_ = get1 ts in
+            let* args = unfold_builtin B.And and_ in
+            let c =
+              Clause.of_list
+                (Lit.make true and_ :: List.map (Lit.make false) args)
             in
-            Some c'
+            Some c
           with
-          | Some c' ->
-            let ok = Clause.equal c c' in
-            ok, c'
+          | Some c -> true, c
           | None ->
-            Log.err (fun k->k"cannot check and-i %a" Clause.pp c);
-            false, c
+            Log.err (fun k->k"cannot check %a" P.pp p);
+            false, Clause.empty
         end
 
       | P.And_e ->
@@ -719,16 +736,19 @@ module Make(A : ARG) : S = struct
         begin
           let open CCOpt.Infix in
           match
-            let* pos = Clause.uniq_pos_lit c in
-            let* neg = Clause.uniq_neg_lit c in
-            let* args = unfold_builtin B.And (Lit.atom neg) in
-            let ok = CCList.mem ~eq:E.equal (Lit.atom pos) args in
+            let* and_, u = get2 ts in
+            let* args = unfold_builtin B.And and_ in
+            let ok = CCList.mem ~eq:E.equal u args in
+            let c =
+              if ok then Clause.of_list [Lit.make false and_; Lit.make true u]
+              else Clause.empty
+            in
             Some (ok, c)
           with
           | Some tup -> tup
           | None ->
-            Log.err (fun k->k"cannot check and-e %a" Clause.pp c);
-            false, c
+            Log.err (fun k->k"cannot check %a" P.pp p);
+            false, Clause.empty
         end
 
       | P.Or_i ->
@@ -737,16 +757,19 @@ module Make(A : ARG) : S = struct
         begin
           let open CCOpt.Infix in
           match
-            let* pos = Clause.uniq_pos_lit c in
-            let* neg = Clause.uniq_neg_lit c in
-            let* args = unfold_builtin B.Or (Lit.atom pos) in
-            let ok = CCList.mem ~eq:E.equal (Lit.atom neg) args in
+            let* or_, u = get2 ts in
+            let* args = unfold_builtin B.Or or_ in
+            let ok = CCList.mem ~eq:E.equal u args in
+            let c =
+              if ok then Clause.of_list [Lit.make false u; Lit.make true or_]
+              else Clause.empty
+            in
             Some (ok, c)
           with
-          | Some r -> r
+          | Some tup -> tup
           | None ->
-            Log.err (fun k->k"cannot check or-i %a" Clause.pp c);
-            false, c
+            Log.err (fun k->k"cannot check %a" P.pp p);
+            false, Clause.empty
         end
 
       | P.Or_e ->
@@ -755,19 +778,18 @@ module Make(A : ARG) : S = struct
         begin
           let open CCOpt.Infix in
           match
-            let* neg = Clause.uniq_neg_lit c in
-            let* args = unfold_builtin B.Or (Lit.atom neg) in
-            let c' =
-              Clause.of_list (neg :: List.map (fun a -> Lit.make ~sign:true a) args)
+            let* or_ = get1 ts in
+            let* args = unfold_builtin B.Or or_ in
+            let c =
+              Clause.of_list
+                (Lit.make false or_ :: List.map (Lit.make true) args)
             in
-            Some c'
+            Some c
           with
-          | Some c' ->
-            let ok = Clause.equal c c' in
-            ok, c'
+          | Some c -> true, c
           | None ->
-            Log.err (fun k->k"cannot check or-e %a" Clause.pp c);
-            false, c
+            Log.err (fun k->k"cannot check %a" P.pp p);
+            false, Clause.empty
         end
 
       | P.Not_i
@@ -775,7 +797,7 @@ module Make(A : ARG) : S = struct
       | P.Imp_i
       | P.Imp_e
       | P.Eq_i
-      | P.Eq_e 
+      | P.Eq_e
       | P.Xor_i
       | P.Xor_e ->
         false, Clause.empty (* TODO *)
@@ -833,11 +855,11 @@ module Make(A : ARG) : S = struct
       | Some lit_lhs, Some lit_eqn ->
         assert (Lit.sign lit_eqn);
         (* preserve sign of the rewritten literal *)
-        let new_lit = Lit.make ~sign:(Lit.sign lit_lhs) rhs in
+        let new_lit = Lit.make (Lit.sign lit_lhs) rhs in
         Clause.(
           add new_lit @@
           union
-            (remove (Lit.make lhs) c1)
+            (remove (Lit.make true lhs) c1)
             (remove lit_eqn c2)
         )
     in
@@ -892,16 +914,20 @@ module Make(A : ARG) : S = struct
       let c = check_proof_or_empty_ proof in
       Log.debug (fun k->k"step '%s'@ yields %a" name Clause.pp c);
 
-      let expected_res = conv_clause res in
+      (* clause declared with this step *)
+      let expected_c = conv_clause res in
 
       let c =
-        if Clause.equal c expected_res then c
-        else (
+        if Clause.subset c expected_c then (
+          (* [c subset expected_c] is valid, we just use [expected_c]
+             in the rest of the proof to avoid drift *)
+          expected_c
+        ) else (
           Log.err (fun k->k"step '%s'@ should yield %a@ but proof returns %a"
-                      name Clause.pp expected_res Clause.pp c);
+                      name Clause.pp expected_c Clause.pp c);
           st.n_invalid <- 1 + st.n_invalid;
           (* use the expected clause instead *)
-          expected_res
+          expected_c
         )
       in
 

@@ -48,6 +48,7 @@ let main ~quiet ~problem proof : 'a =
   exit (if proof_valid then 0 else 1)
 
 let () =
+  Tracy.enable();
   let files = ref [] in
   let color = ref true in
   let quiet = ref false in

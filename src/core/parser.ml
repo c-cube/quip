@@ -201,6 +201,7 @@ module Proof = struct
     | _ -> parse_errorf s "expected `(quip 1 <proof>)`"
 
   let parse_lexbuf_ ~filename lexbuf : P.t =
+    Tracy.with_ ~file:__FILE__ ~line:__LINE__ ~name:"parse" () @@ fun _sp ->
     Loc.set_file lexbuf filename;
     let dec = SP.Decoder.of_lexbuf lexbuf in
     let s =

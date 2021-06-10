@@ -518,6 +518,7 @@ module Make(A : ARG) : S = struct
   (* check [p], returns its resulting clause.
      In case of error this returns the empty clause. *)
   and check_proof_or_empty_ p : Clause.t =
+    Tracy.with_ ~file:__FILE__ ~line:__LINE__ ~name:"check-proof" () @@ fun _sp ->
     st.n_steps <- 1 + st.n_steps;
     try
       let ok, c = check_proof_rec_exn p in

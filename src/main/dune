@@ -3,6 +3,7 @@
   (name quip)
   (public_name quip)
   (libraries quip.core quip.check trustee.core
-             smtlib-utils containers ppx_deriving.runtime)
+             smtlib-utils containers ppx_deriving.runtime
+             tracy tracy-client)
   (preprocess (pps ppx_deriving.std))
   (flags :standard -warn-error -a+8))

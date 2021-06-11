@@ -90,64 +90,6 @@ module Proof = struct
       c_lits
     | _ -> parse_errorf s "expected a clause `(cl t1 t2 … tn)`"
 
-  (*
-  let rules =
-    let open P in
-    [ "res", Pr_resolution;
-      "cc", Pr_congruence;
-      "cleq", Pr_clause_eq;
-      "assume", Pr_assume;
-      "thl", Pr_theory_lemma;
-    ] |> CCHashtbl.of_list
-
-  (* find a keyword argument in a sexp *)
-  let rec find_kw k = function
-    | [] -> None
-    | {s=Atom x;_} :: y :: _ when x=k -> Some y
-    | _ :: _ :: tl -> find_kw k tl
-    | s :: _ -> parse_errorf s "invalid keyword list"
-
-  let premises_of_sexp self s =
-    match s.s with
-    | List l ->
-      List.map
-        (function
-          | {s=Atom name;_} -> P.find_step self.proof name
-          | s -> parse_errorf s "expected a previous step")
-        l
-    | _ -> parse_errorf s "expected a list of premises"
-
-  let rule_of_sexp s =
-    match s.s with
-    | Atom name ->
-      (try Hashtbl.find rules name
-       with Not_found -> parse_errorf s "expected rule, unknown rule %S" name)
-    | List _ -> parse_errorf s "expected rule"
-
-  let step_of_sexp (self:env) (s:sexp) : P.step =
-    match s.s with
-    | List [{s=Atom "assume";_}; {s=Atom name;_}; t] ->
-      let c = {P.c_lits=[t_of_sexp self t]} in
-      {P.ps_name=name; ps_clause=c; ps_rule=P.Pr_assume; ps_premises=[]; }
-    | List ({s=Atom "step";_} :: {s=Atom name;_} :: c :: kw) ->
-      let c = cl_of_sexp self c in
-      let ps_premises =
-        find_kw ":premises" kw
-        |> CCOpt.map (premises_of_sexp self) |> CCOpt.get_or ~default:[]
-      and ps_rule =
-        find_kw ":rule" kw
-        |> CCOpt.map rule_of_sexp
-        |> CCOpt.get_lazy (fun () -> parse_errorf s "missing rule")
-      in
-      {P.ps_name=name; ps_clause=c; ps_rule; ps_premises; }
-    | _ -> parse_errorf s "expected a proof step, got %a" SP.pp s
-
-  let add_step (self:env) (s:sexp) : unit =
-    Log.debugf 1 (fun k->k"(@[proof.add-step@ %a@])" SP.pp s);
-    let s = step_of_sexp self s in
-    P.add_step self.proof s
-     *)
-
   let asm_of_sexp s =
     match s.s with
     | List [{s=Atom name;_}; lit] ->

@@ -98,6 +98,7 @@ module Proof = struct
     | _ -> parse_errorf s "expected an assumption `(<name> <lit>)`"
 
   let rec p_of_sexp (s:sexp) : P.t =
+    Tracy.with_ ~file:__FILE__ ~line:__LINE__ ~name:"p-of-sexp" () @@ fun _sp ->
     match s.s with
     | List [{s=Atom "steps";_}; {s=List asms;_}; {s=List steps;_}] ->
       let assms = List.map asm_of_sexp asms in
@@ -205,7 +206,9 @@ module Proof = struct
     Loc.set_file lexbuf filename;
     let dec = SP.Decoder.of_lexbuf lexbuf in
     let s =
-      match SP.Decoder.next dec with
+      match
+        Tracy.with_ ~file:__FILE__ ~line:__LINE__ ~name:"decode-sexp" () @@ fun _sp ->
+        SP.Decoder.next dec with
       | SP.Yield s ->
         begin match SP.Decoder.next dec with
           | SP.End -> s

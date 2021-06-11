@@ -627,7 +627,7 @@ module Make(A : ARG) : S = struct
               not just equalities *)
 
         let module CC = Trustee_core.Congruence_closure in
-        begin match CC.prove_cc ctx hyps t u with
+        begin match CC.prove_cc_eqn ctx hyps t u with
           | None ->
             errorf (fun k->k"failed to prove CC-lemma@ %a" P.pp p)
           | Some thm ->
@@ -640,22 +640,18 @@ module Make(A : ARG) : S = struct
         let pos = Clause.pos_lits_list c in
         let negs = Clause.neg_lits_list c in
         begin match pos with
-          | [l1] ->
-            let t, u = match E.unfold_eq (Lit.to_expr l1) with
-              | Some p -> p
-              | None ->
-                errorf (fun k->k"cc-lemma: positive literal must be an equation")
-            in
+          | [goal] ->
 
+            let goal = Lit.atom goal in
             let ps = List.map (fun l -> K.Thm.assume ctx (Lit.atom l)) negs in
 
-            (* prove [negs |- t=u] *)
+            (* prove [negs |- goal] *)
             Log.debug
-              (fun k->k"cc-lemma@ :ps %a@ :t %a@ :u %a"
-                      (Fmt.Dump.list K.Thm.pp_quoted) ps E.pp t E.pp u);
+              (fun k->k"cc-lemma@ :ps %a@ :goal %a"
+                      (Fmt.Dump.list K.Thm.pp_quoted) ps E.pp goal);
 
             let module CC = Trustee_core.Congruence_closure in
-            begin match CC.prove_cc ctx ps t u with
+            begin match CC.prove_cc_bool ctx ps goal with
               | None ->
                 errorf (fun k->k"failed to prove CC-lemma@ %a" P.pp p)
               | Some thm ->
@@ -663,7 +659,8 @@ module Make(A : ARG) : S = struct
             end
           | _ ->
             errorf
-              (fun k->k"cc-lemma: expected exactly one positive literal@ in %a" P.pp p)
+              (fun k->k"cc-lemma: expected exactly one positive literal@ in %a"
+                  Fmt.(Dump.list Lit.pp) (Clause.lits_list c))
           end
 
       | P.Hres (init, steps) ->

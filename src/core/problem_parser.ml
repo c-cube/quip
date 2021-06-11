@@ -40,6 +40,7 @@ module Smtlib = struct
     (* pre-populate with some builtins *)
     begin
       let bool = E.bool ctx in
+      let type_ = E.type_ ctx in
       Hashtbl.add self.ty_consts "Bool" (K.Const.bool ctx);
       let (@->) a b = E.arrow_l ctx a b in
       let addc s b c =
@@ -49,10 +50,12 @@ module Smtlib = struct
         Hashtbl.add self.ty_consts s c; (* TODO: also remember builtin *)
         Builtin.Tbl.add self.builtins b c;
       in
-      let mkc s b ty =
-        let c =  E.new_const ctx s [] ty in
+      let mkc ?(tyvars=[]) s b ty =
+        let c =  E.new_const ctx s tyvars ty in
         addc s b c
       in
+      let v_alpha = K.Var.make "A" type_ in
+      let alpha = E.var ctx v_alpha in
       mkc "true" Builtin.True @@ bool;
       mkc "false" Builtin.False @@ bool;
       mkc "not" Builtin.Not @@ [bool] @-> bool;
@@ -60,6 +63,7 @@ module Smtlib = struct
       mkc "or" Builtin.Or @@ [bool;bool] @-> bool;
       mkc "xor" Builtin.Xor @@ [bool;bool] @-> bool;
       mkc "=>" Builtin.Imply @@ [bool;bool] @-> bool;
+      mkc ~tyvars:[v_alpha] "ite" Builtin.If @@ [bool;alpha;alpha] @-> alpha;
       addtyc "Bool" Builtin.Bool (K.Const.bool ctx);
       addc "=" Builtin.Eq (K.Const.eq ctx);
     end;
@@ -85,6 +89,10 @@ module Smtlib = struct
         end
     in
     loop ty
+
+  let find_b_ env b =
+    try Builtin.Tbl.find env.builtins b
+    with Not_found -> errorf "cannot find builtin %a" Builtin.pp b
 
   let conv_expr (self:env) e : E.t =
     let find_const_ c =
@@ -143,12 +151,27 @@ module Smtlib = struct
       | SA.Imply (a,b) -> app_str "=>" [loop' a; loop' b]
       | SA.And l -> app_assoc "and" "true" (List.map loop' l)
       | SA.Or l -> app_assoc "or" "false" (List.map loop' l)
-      | SA.If _
+      | SA.If (a,b,c) ->
+        let a = loop' a in
+        let b = loop' b in
+        let c = loop' c in
+        let ty_a = E.ty_exn a in
+        let c_if = E.const self.ctx (find_b_ self Builtin.If) [ty_a] in
+        E.app_l self.ctx c_if [a; b; c]
+      | SA.Distinct l ->
+        (* translate to [/\_{i<j} l_i /= l_j] *)
+        let l = List.map loop' l in
+        let l2 =
+          CCList.diagonal l
+          |> List.rev_map (fun (a,b) ->
+              app_str "not" [E.app_eq self.ctx a b])
+        in
+        app_assoc "and" "true" l2
+
       | SA.Arith (_, _)|SA.Match
           (_, _)|SA.Is_a (_, _)|SA.Fun (_, _)
-      | SA.Distinct _|SA.Cast (_, _)|SA.Forall
-        (_, _)|SA.Exists (_, _)|SA.Attr (_, _) ->
-        errorf "unhandled expr: %a" SA.pp_term e
+      |SA.Cast (_, _)|SA.Forall (_, _)|SA.Exists (_, _)|SA.Attr (_, _) ->
+        errorf "problem parser: unhandled expr: %a" SA.pp_term e
         (* TODO *)
     in
     loop Str_map.empty e

@@ -162,9 +162,15 @@ module Proof = struct
       let steps = List.map step_of_sexp steps in
       P.composite_l ~assms steps
 
-    | List [{s=Atom "cc-lemma";_}; cl] ->
+    | List [{s=Atom "ccl";_}; cl] ->
       let cl = cl_of_sexp cl in
       P.cc_lemma cl
+
+    | List [{s=Atom "ccli";_}; {s=List prs;_}; t; u] ->
+      let t = t_of_sexp t in
+      let u = t_of_sexp u in
+      let prs = List.map p_of_sexp prs in
+      P.cc_imply_l prs t u
 
     | List [{s=Atom "nn";_}; p] ->
       let p = p_of_sexp p in
@@ -189,8 +195,7 @@ module Proof = struct
       ) in
       P.bool_c name ts
 
-    | List ({s=Atom "hres";_} ::
-            {s=List [{s=Atom "init";_}; init];_} :: steps) ->
+    | List [{s=Atom "hres";_}; init; {s=List steps;_}] ->
       let pstep s = match s.s with
         | List [{s=Atom "p1";_}; sub_p] -> P.p1 (p_of_sexp sub_p)
         | List [{s=Atom "p";_}; lhs; rhs; sub_p] ->
@@ -199,8 +204,8 @@ module Proof = struct
           let sub_p = p_of_sexp sub_p in
           P.p sub_p ~lhs ~rhs
         | List [{s=Atom "r1";_}; sub_p] -> P.r1 (p_of_sexp sub_p)
-        | List [{s=Atom "r";_}; {s=List [{s=Atom "pivot";_}; piv];_}; sub_p] ->
-          let pivot = t_of_sexp piv in
+        | List [{s=Atom "r";_}; pivot; sub_p] ->
+          let pivot = t_of_sexp pivot in
           let sub_p = p_of_sexp sub_p in
           P.r ~pivot sub_p
         | _ ->
@@ -218,7 +223,7 @@ module Proof = struct
     | List [{s=Atom "refl";_}; t] ->
       P.refl (t_of_sexp t)
 
-    | List [{s=Atom "ref";_}; {s=Atom name;_}] ->
+    | List [{s=Atom ("@" | "ref");_}; {s=Atom name;_}] ->
       P.ref_by_name name
 
     | _ -> parse_errorf s "expected a proof"

@@ -663,6 +663,26 @@ module Make(A : ARG) : S = struct
                   Fmt.(Dump.list Lit.pp) (Clause.lits_list c))
           end
 
+      | P.Res {pivot; p1; p2} ->
+        let pivot = conv_term pivot in
+        let c1 = check_proof_or_empty_ p1 in
+        let c2 = check_proof_or_empty_ p2 in
+        true, res_on_ ~pivot c1 c2
+
+      | P.Res1 {p1; p2} ->
+        let c1 = check_proof_or_empty_ p1 in
+        let c2 = check_proof_or_empty_ p2 in
+        begin match Clause.as_singleton c1, Clause.as_singleton c2 with
+          | Some lit, _
+          | None, Some lit ->
+            true, res_on_ ~pivot:(Lit.atom lit) c1 c2
+          | None, None ->
+            errorf
+              (fun k->k"res1: expected one of the clauses to be unit@ \
+                        where c1=`%a`,@ c2=`%a`"
+                  Clause.pp c1 Clause.pp c2)
+        end
+
       | P.Hres (init, steps) ->
 
         let init = check_proof_or_empty_ init in
@@ -800,72 +820,69 @@ module Make(A : ARG) : S = struct
         false, Clause.empty (* TODO *)
     end
 
-  and check_hres_step_ (c1: Clause.t) (step:P.hres_step) : Clause.t =
+  (* do resolution between [c1] and [c2] *)
+  and res_on_ ~pivot c1 c2 : Clause.t =
+    Log.debug (fun k->k "(@[resolve@ :c1 %a@ :c2 %a@ :pivot %a@])"
+                  Clause.pp c1 Clause.pp c2 E.pp pivot);
+    (* find the polarity of [pivot] in [c1] *)
+    match Clause.find_lit_by_term pivot c1 with
+    | Some lit ->
+      let lit' = Lit.neg lit in
+      if Clause.mem lit' c2 then (
+        Clause.(union (remove lit c1) (remove lit' c2))
+      ) else (
+        errorf (fun k->k"cannot resolve: literal %a@ does not occur in `%a`"
+                   Lit.pp (Lit.neg lit) Clause.pp c2)
+      )
 
-    (* do resolution between [c1] and [c2] *)
-    let res_on_ ~pivot c2 =
-      Log.debug (fun k->k "(@[resolve@ :c1 %a@ :c2 %a@ :pivot %a@])"
-                    Clause.pp c1 Clause.pp c2 E.pp pivot);
-      (* find the polarity of [pivot] in [c1] *)
-      match Clause.find_lit_by_term pivot c1 with
-      | Some lit ->
-        let lit' = Lit.neg lit in
-        if Clause.mem lit' c2 then (
-          Clause.(union (remove lit c1) (remove lit' c2))
-        ) else (
-          errorf (fun k->k"cannot resolve: literal %a@ does not occur in `%a`"
-                     Lit.pp (Lit.neg lit) Clause.pp c2)
-        )
+    | None ->
+      errorf (fun k->k"cannot resolve %a@ on pivot `%a`" Clause.pp c1 E.pp pivot)
 
-      | None ->
-        errorf (fun k->k"cannot resolve %a@ on pivot `%a`" Clause.pp c1 E.pp pivot)
-    in
-
-    (* do bool paramodulation between [c1] and [c2],
+  (* do bool paramodulation between [c1] and [c2],
        where [c2] must contain [lhs = rhs] and [c1] must contain [lhs] *)
-    let bool_param_on_ ~lhs ~rhs c2 =
-      Log.debug (fun k->k "(@[bool-param@ :c1 %a@ :c2 %a@ :lhs `%a`@ :rhs `%a`@])"
-                    Clause.pp c1 Clause.pp c2 E.pp lhs E.pp rhs);
-      (* find if [c2] contains [lhs=rhs] or [rhs=lhs] *)
-      match
-        Clause.find_lit_by_term lhs c1,
-        (Clause.lits c2
-        |> Iter.filter Lit.sign
-        |> Iter.find_map
-          (fun lit ->
-             let e = Lit.atom lit in
-             match E.unfold_eq e with
-             | Some (t1, t2) when E.equal t1 lhs && E.equal t2 rhs ->
-               Some lit
-             | Some (t1, t2) when E.equal t2 lhs && E.equal t1 rhs ->
-               Some lit
-             | _ -> None))
-      with
-      | None, _ ->
-        errorf
-          (fun k->k"cannot perform bool paramod@ in `%a`:@ it does not contain `%a`"
-              Clause.pp c1 K.Expr.pp lhs)
+  and bool_param_on_ ~lhs ~rhs c1 c2 : Clause.t =
+    Log.debug (fun k->k "(@[bool-param@ :c1 %a@ :c2 %a@ :lhs `%a`@ :rhs `%a`@])"
+                  Clause.pp c1 Clause.pp c2 E.pp lhs E.pp rhs);
+    (* find if [c2] contains [lhs=rhs] or [rhs=lhs] *)
+    match
+      Clause.find_lit_by_term lhs c1,
+      (Clause.lits c2
+       |> Iter.filter Lit.sign
+       |> Iter.find_map
+         (fun lit ->
+            let e = Lit.atom lit in
+            match E.unfold_eq e with
+            | Some (t1, t2) when E.equal t1 lhs && E.equal t2 rhs ->
+              Some lit
+            | Some (t1, t2) when E.equal t2 lhs && E.equal t1 rhs ->
+              Some lit
+            | _ -> None))
+    with
+    | None, _ ->
+      errorf
+        (fun k->k"cannot perform bool paramod@ in `%a`:@ it does not contain `%a`"
+            Clause.pp c1 K.Expr.pp lhs)
 
-      | _, None ->
-        errorf (fun k->k"cannot do unit-paramod on %a" Clause.pp c2)
+    | _, None ->
+      errorf (fun k->k"cannot do unit-paramod on %a" Clause.pp c2)
 
-      | Some lit_lhs, Some lit_eqn ->
-        assert (Lit.sign lit_eqn);
-        (* preserve sign of the rewritten literal *)
-        let new_lit = Lit.make (Lit.sign lit_lhs) rhs in
-        Clause.(
-          add new_lit @@
-          union
-            (remove (Lit.make true lhs) c1)
-            (remove lit_eqn c2)
-        )
-    in
+    | Some lit_lhs, Some lit_eqn ->
+      assert (Lit.sign lit_eqn);
+      (* preserve sign of the rewritten literal *)
+      let new_lit = Lit.make (Lit.sign lit_lhs) rhs in
+      Clause.(
+        add new_lit @@
+        union
+          (remove (Lit.make true lhs) c1)
+          (remove lit_eqn c2)
+      )
 
+  and check_hres_step_ (c1: Clause.t) (step:P.hres_step) : Clause.t =
     begin match step with
       | P.R {pivot; p} ->
         let pivot = conv_term pivot in
         let c2 = check_proof_or_empty_ p in
-        res_on_ ~pivot c2
+        res_on_ ~pivot c1 c2
 
       | P.R1 p ->
         let c2 = check_proof_or_empty_ p in
@@ -875,13 +892,13 @@ module Make(A : ARG) : S = struct
                        Clause.pp c2)
           | Some t -> Lit.atom t
         in
-        res_on_ ~pivot c2
+        res_on_ ~pivot c1 c2
 
       | P.P { lhs; rhs; p } ->
         let lhs = conv_term lhs in
         let rhs = conv_term rhs in
         let c2 = check_proof_or_empty_ p in
-        bool_param_on_ ~lhs ~rhs c2
+        bool_param_on_ ~lhs ~rhs c1 c2
 
       | P.P1 p ->
         let c2 = check_proof_or_empty_ p in
@@ -892,7 +909,7 @@ module Make(A : ARG) : S = struct
         | Some lit ->
           assert (Lit.sign lit);
           begin match E.unfold_eq (Lit.atom lit) with
-            | Some (lhs, rhs) -> bool_param_on_ ~lhs ~rhs c2
+            | Some (lhs, rhs) -> bool_param_on_ ~lhs ~rhs c1 c2
             | None -> fail()
           end
         | None -> fail()

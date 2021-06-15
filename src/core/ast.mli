@@ -118,6 +118,8 @@ module Proof : sig
     | Assert of term
     | Assert_c of clause
     | Hres of t * hres_step list
+    | Res of { pivot: term; p1: t; p2: t }
+    | Res1 of { p1: t; p2: t }
     | DT_isa_split of ty * term list
     | DT_isa_disj of ty * term * term
     | DT_cstor_inj of Name.t * int * term list * term list (* [c t…=c u… |- t_i=u_i] *)
@@ -161,6 +163,8 @@ module Proof : sig
   val ref_by_name : string -> t (* named clause, see {!defc} *)
   val assertion_c : lit list -> t
   val hres_l : t -> hres_step list -> t (* hyper-res *)
+  val res : pivot:term -> t -> t -> t
+  val res1 : t -> t -> t
   val refl : term -> t (* proof of [| t=t] *)
   val true_is_true : t (* proof of [|- true] *)
   val true_neq_false : t (* proof of [|- not (true=false)] *)

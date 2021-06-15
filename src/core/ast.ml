@@ -119,6 +119,8 @@ module Proof = struct
     | Assert of term
     | Assert_c of clause
     | Hres of t * hres_step list
+    | Res of { pivot: term; p1: t; p2: t }
+    | Res1 of { p1: t; p2: t }
     | DT_isa_split of ty * term list
     | DT_isa_disj of ty * term * term
     | DT_cstor_inj of Name.t * int * term list * term list (* [c t…=c u… |- t_i=u_i] *)
@@ -221,6 +223,8 @@ module Proof = struct
   let nn p : t = Nn p
 
   let hres_l c l : t = Hres (c,l)
+  let res ~pivot p1 p2 : t = Res{pivot;p1;p2}
+  let res1 p1 p2 : t = Res1{p1;p2}
 
   let lra_l c : t = LRA c
 
@@ -246,6 +250,8 @@ module Proof = struct
           | R {pivot;p} -> f_p p; f_t pivot
           | P {lhs;rhs;p} -> f_p p; f_t lhs; f_t rhs)
         l
+    | Res {pivot;p1;p2} -> f_t pivot; f_p p1; f_p p2
+    | Res1 {p1;p2} -> f_p p1; f_p p2
     | DT_isa_split (_, l) -> List.iter f_t l
     | DT_isa_disj (_, t, u) -> f_t t; f_t u
     | DT_cstor_inj (_, _c, ts, us) -> List.iter f_t ts; List.iter f_t us

@@ -137,6 +137,17 @@ module Proof = struct
       ) in
       P.bool_c name ts
 
+    | List [{s=Atom "r";_}; pivot; p1; p2] ->
+      let pivot = t_of_sexp pivot in
+      let p1 = p_of_sexp p1 in
+      let p2 = p_of_sexp p2 in
+      P.res ~pivot p1 p2
+
+    | List [{s=Atom "r1";_}; p1; p2] ->
+      let p1 = p_of_sexp p1 in
+      let p2 = p_of_sexp p2 in
+      P.res1 p1 p2
+
     | List [{s=Atom "hres";_}; init; {s=List steps;_}] ->
       let pstep s = match s.s with
         | List [{s=Atom "p1";_}; sub_p] -> P.p1 (p_of_sexp sub_p)

@@ -137,6 +137,9 @@ module Proof = struct
       ) in
       P.bool_c name ts
 
+    | Atom "t-ne-f" -> P.true_neq_false
+    | Atom "t-is-t" -> P.true_is_true
+
     | List [{s=Atom "r";_}; pivot; p1; p2] ->
       let pivot = t_of_sexp pivot in
       let p1 = p_of_sexp p1 in

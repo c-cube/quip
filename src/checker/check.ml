@@ -705,12 +705,20 @@ module Make(A : ARG) : S = struct
         in
         true, c
 
+      | P.Bool_true_is_true ->
+        let true_ = E.const ctx (get_builtin_ B.True) [] in
+        true, Clause.singleton @@ Lit.make true true_
+
+      | P.Bool_true_neq_false ->
+        let true_ = E.const ctx (get_builtin_ B.True) [] in
+        let false_ = E.const ctx (get_builtin_ B.False) [] in
+        let eq = E.app_eq ctx true_ false_ in
+        true, Clause.singleton @@ Lit.make false eq
+
 
       | P.DT_isa_split (_, _)
       | P.DT_isa_disj (_, _, _)
       | P.DT_cstor_inj (_, _, _, _)
-      | P.Bool_true_is_true
-      | P.Bool_true_neq_false
       | P.Bool_eq (_, _)
       | P.Ite_true _
       | P.Ite_false _
@@ -831,8 +839,8 @@ module Make(A : ARG) : S = struct
       if Clause.mem lit' c2 then (
         Clause.(union (remove lit c1) (remove lit' c2))
       ) else (
-        errorf (fun k->k"cannot resolve: literal %a@ does not occur in `%a`"
-                   Lit.pp (Lit.neg lit) Clause.pp c2)
+        errorf (fun k->k"cannot resolve: pivot `%a`@ does not occur in `%a`"
+                   E.pp pivot Clause.pp c2)
       )
 
     | None ->

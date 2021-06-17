@@ -52,7 +52,7 @@ let () =
   let color = ref true in
   let quiet = ref false in
 
-  let log_level = ref Logs.Error in
+  let log_level = ref Logs.Warning in
 
   let opts = [
     "--info", Arg.Unit (fun() -> log_level := Logs.Info), " set log level to info";

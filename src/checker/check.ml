@@ -629,6 +629,9 @@ module Make(A : ARG) : S = struct
         let module CC = Trustee_core.Congruence_closure in
         begin match CC.prove_cc_eqn ctx hyps t u with
           | None ->
+            Log.err (fun k->k"hyps: %a;@ concl: `@[%a@ = %a@]`"
+                          Fmt.(Dump.list K.Thm.pp_quoted) hyps
+                          E.pp t E.pp u);
             errorf (fun k->k"failed to prove CC-lemma@ %a" P.pp p)
           | Some thm ->
             true, Clause.of_thm thm
@@ -653,7 +656,8 @@ module Make(A : ARG) : S = struct
             let module CC = Trustee_core.Congruence_closure in
             begin match CC.prove_cc_bool ctx ps goal with
               | None ->
-                errorf (fun k->k"failed to prove CC-lemma@ %a" P.pp p)
+                Log.err (fun k->k"clause: %a" Clause.pp c);
+                errorf (fun k->k"failed to prove !!! CC-lemma@ %a" P.pp p)
               | Some thm ->
                 true, Clause.of_thm thm
             end

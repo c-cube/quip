@@ -47,6 +47,14 @@ module Make(A : ARG) : S = struct
     let bool = E.bool ctx
   end
 
+  (* always normalize equations so that the order in which they were
+     input does not matter *)
+  let normalize_expr_ e =
+    match E.unfold_eq e with
+    | Some (a,b) when E.compare a b < 0 ->
+      E.app_eq ctx b a
+    | _ -> e
+
   (** {2 Literal} *)
   module Lit : sig
     type t [@@deriving show, eq, ord]
@@ -68,8 +76,11 @@ module Make(A : ARG) : S = struct
 
     let[@inline] sign self = self.sign
     let[@inline] atom self = self.expr
-    let[@inline] make sign expr = {sign;expr}
     let[@inline] neg (self:t) : t = {self with sign=not self.sign}
+
+    let[@inline] make sign expr =
+      let expr = normalize_expr_ expr in
+      {sign;expr}
 
     let to_expr (self:t) : K.expr =
       if self.sign then self.expr
@@ -193,6 +204,7 @@ module Make(A : ARG) : S = struct
     let neg_lits_list self = neg_lits self |> Iter.to_rev_list
 
     let find_lit_by_term e (self:t) : Lit.t option =
+      let e = normalize_expr_ e in
       if ESet.mem e self.pos then Some (Lit.make true e)
       else if ESet.mem e self.neg then Some (Lit.make false e)
       else None
@@ -215,6 +227,16 @@ module Make(A : ARG) : S = struct
         c
         (K.Thm.hyps_iter th)
   end
+
+  (* if [e] the builtin [b]? *)
+  let is_builtin_const_ b (e:E.t) : bool =
+    match E.view e with
+    | E.E_const (c, _) ->
+      begin match Problem.find_builtin b with
+        | Some c' -> K.Const.equal c c'
+        | None -> false
+      end
+    | _ -> false
 
   (* turn [not e] into [Some e], any other term into [None] *)
   let unfold_not_ (e:E.t) : E.t option =
@@ -459,6 +481,7 @@ module Make(A : ARG) : S = struct
 
   let rec conv_term (t: Ast.term) : K.expr =
     let module T = Ast.Term in
+    Log.debug (fun k->k"conv-t %a" T.pp t);
     begin match T.view t with
       | T.App (f, l) ->
         let l = List.map conv_term l in
@@ -493,6 +516,12 @@ module Make(A : ARG) : S = struct
                 errorf(fun k->k"cannot convert unknown term@ `%a`" T.pp t)
             end
         end
+      | T.Ite (a,b,c) ->
+        let ite = get_builtin_ B.If in
+        let a = conv_term a in
+        let b = conv_term b in
+        let c = conv_term c in
+        E.app_l ctx (E.const ctx ite [E.ty_exn b]) [a;b;c]
       | _ ->
         (* TODO *)
         errorf (fun k->k"todo: conv term `%a`" T.pp t)
@@ -699,12 +728,14 @@ module Make(A : ARG) : S = struct
 
       | P.Nn p ->
         let c = check_proof_or_empty_ p in
+
         let c =
           Clause.lits c
-          |> Iter.map (fun lit ->
-              match unfold_not_ (Lit.atom lit) with
-              | Some u -> Lit.make (not (Lit.sign lit)) u
-              | None -> lit)
+          |> Iter.map
+            (fun lit ->
+               match unfold_not_ (Lit.atom lit) with
+               | Some u -> Lit.make (not (Lit.sign lit)) u
+               | None -> lit)
           |> Clause.of_iter
         in
         true, c
@@ -719,13 +750,33 @@ module Make(A : ARG) : S = struct
         let eq = E.app_eq ctx true_ false_ in
         true, Clause.singleton @@ Lit.make false eq
 
+      | P.Ite_true t_ite ->
+        (* clause [(cl (- a) (+ (= (ite a b c) b)))] *)
+        let t_ite = conv_term t_ite in
+        begin match E.unfold_app t_ite with
+          | ite, [a;b;_c] when is_builtin_const_ B.If ite ->
+            true, Clause.of_list [Lit.make false a; Lit.make true (E.app_eq ctx t_ite b)]
+          | _ -> errorf (fun k->k"expected a `ite` term,@ got `%a`" E.pp t_ite)
+        end
+
+      | P.Ite_false t_ite ->
+        (* clause [(cl (- ¬a) (+ (= (ite a b c) c)))] *)
+        let t_ite = conv_term t_ite in
+        begin match E.unfold_app t_ite with
+          | ite, [a;_b;c] when is_builtin_const_ B.If ite ->
+            let c =
+              Clause.of_list [
+                Lit.make false (E.app ctx Cst.not_ a);
+                Lit.make true (E.app_eq ctx t_ite c)
+              ] in
+            true, c
+          | _ -> errorf (fun k->k"expected a `ite` term,@ got `%a`" E.pp t_ite)
+        end
 
       | P.DT_isa_split (_, _)
       | P.DT_isa_disj (_, _, _)
       | P.DT_cstor_inj (_, _, _, _)
       | P.Bool_eq (_, _)
-      | P.Ite_true _
-      | P.Ite_false _
       | P.LRA _
         ->
         Log.warn (fun k->k"unimplemented: checking %a" P.pp p);

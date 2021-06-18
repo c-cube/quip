@@ -155,8 +155,8 @@ module Smtlib = struct
         let a = loop' a in
         let b = loop' b in
         let c = loop' c in
-        let ty_a = E.ty_exn a in
-        let c_if = E.const self.ctx (find_b_ self Builtin.If) [ty_a] in
+        let ty_b = E.ty_exn b in
+        let c_if = E.const self.ctx (find_b_ self Builtin.If) [ty_b] in
         E.app_l self.ctx c_if [a; b; c]
       | SA.Distinct l ->
         (* translate to [/\_{i<j} l_i /= l_j] *)

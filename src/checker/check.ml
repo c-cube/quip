@@ -61,11 +61,12 @@ module Make(A : ARG) : S = struct
     let module Th = (val K.make_thm ctx) in
     let module RW = Trustee_core.Rw in
 
-    let x = E.var_name "x" E.bool in
-    let y = E.var_name "y" E.bool in
-    let z = E.var_name "z" E.bool in
-    let (===) = E.app_eq in
-    let mk_ac c =
+    let mk_bool_ac c =
+      let x = E.var_name "x" E.bool in
+      let y = E.var_name "y" E.bool in
+      let z = E.var_name "z" E.bool in
+      let (===) = E.app_eq in
+
       let f x y = E.app_l c [x; y] in
       RW.AC_rule.make ctx ~f:c
         ~assoc:(Th.axiom [] (f (f x y) z === f x (f y z)))
@@ -73,13 +74,27 @@ module Make(A : ARG) : S = struct
       |> RW.AC_rule.to_conv
     in
 
+    (* rule on polymorphic equality: [|- (x=y) = (y=x)] *)
+    let rule_eq_comm =
+      let v_a = E.var_name "A" E.type_ in
+      let x = E.var_name "x" v_a in
+      let y = E.var_name "y" v_a in
+      let (===) = E.app_eq in
+      let th =
+        Th.bool_eq_intro
+          (Th.assume (y === x) |> Th.sym)
+          (Th.assume (x === y) |> Th.sym)
+      in
+      RW.Rule.(to_conv @@ mk_non_oriented th)
+    in
+
     let conv =
       let and_ = E.const (get_builtin_ B.And) [] in
       let or_ = E.const (get_builtin_ B.Or) [] in
       Trustee_core.Conv.combine_l [
-        mk_ac and_;
-        mk_ac or_;
-        RW.Rule.(to_conv @@ mk_non_oriented (Th.axiom [] ((x === y) === (y === x))))
+        rule_eq_comm;
+        mk_bool_ac and_;
+        mk_bool_ac or_;
       ]
     in
 

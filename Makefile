@@ -7,5 +7,8 @@ all:
 clean:
 	@dune clean
 
+test:
+	@dune runtest -f --no-buffer
+
 watch:
 	@dune build $(TARGET) -w

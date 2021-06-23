@@ -1,0 +1,5 @@
+
+(rule
+  (alias runtest)
+  (deps (:pb NEQ004_size4.smt2) (:proof NEQ004_size4.quip))
+  (action (run ../src/main/quip.exe %{pb} %{proof} -q)))

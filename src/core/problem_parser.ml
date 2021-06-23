@@ -24,7 +24,7 @@ module Smtlib = struct
     ty_consts: (string, K.ty_const [@printer K.Const.pp]) tbl;
     named_terms: (string, K.Expr.t) tbl;
     builtins: (K.const [@printer K.Const.pp]) Builtin.Tbl.t;
-    assms: (K.Thm.t [@printer K.Thm.pp_quoted]) vec;
+    assms: K.Expr.t vec;
   } [@@deriving show {with_path=false}]
 
   let create ctx : env =
@@ -202,9 +202,8 @@ module Smtlib = struct
 
       | SA.Stmt_assert t ->
         let t = conv_expr self t in
-        let th = K.Thm.axiom self.ctx [] t in
-        Log.info (fun k->k"(@[assert@ %a@])" K.Thm.pp_quoted th);
-        CCVector.push self.assms th;
+        Log.info (fun k->k"(@[assert@ `%a`@])" K.Expr.pp t);
+        CCVector.push self.assms t;
 
       | SA.Stmt_fun_def _ | SA.Stmt_fun_rec _
       | SA.Stmt_funs_rec _ ->

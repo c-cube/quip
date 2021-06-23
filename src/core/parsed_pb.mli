@@ -22,7 +22,8 @@ module type S = sig
 
   (* TODO: named terms? *)
 
-  val assumptions : unit -> K.thm Seq.t
+  val assumptions : unit -> K.expr Seq.t
+  (** Iterate over the assumptions *)
 
   val pp_debug : unit Fmt.printer
   (** Print the environment, assumptions, etc. for debug. Can be verbose. *)

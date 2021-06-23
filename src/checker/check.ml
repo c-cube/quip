@@ -49,11 +49,65 @@ module Make(A : ARG) : S = struct
 
   (* always normalize equations so that the order in which they were
      input does not matter *)
-  let normalize_expr_ e =
-    match E.unfold_eq e with
-    | Some (a,b) when E.compare a b < 0 ->
-      E.app_eq ctx b a
-    | _ -> e
+  (* find builtin [b] *)
+  let get_builtin_ b =
+    match Problem.find_builtin b with
+    | Some c -> c
+    | None -> errorf (fun k->k"cannot find builtin %a" B.pp b)
+
+  (* normalize [e] by applying some AC axioms for [and, or, =] *)
+  let normalize_expr_ : E.t -> E.t =
+    let module E = (val K.make_expr ctx) in
+    let module Th = (val K.make_thm ctx) in
+    let module RW = Trustee_core.Rw in
+
+    let x = E.var_name "x" E.bool in
+    let y = E.var_name "y" E.bool in
+    let z = E.var_name "z" E.bool in
+    let (===) = E.app_eq in
+    let mk_ac c =
+      let f x y = E.app_l c [x; y] in
+      RW.AC_rule.make ctx ~f:c
+        ~assoc:(Th.axiom [] (f (f x y) z === f x (f y z)))
+        ~comm:(Th.axiom [] (f x y === f y x)) ()
+      |> RW.AC_rule.to_conv
+    in
+
+    let conv =
+      let and_ = E.const (get_builtin_ B.And) [] in
+      let or_ = E.const (get_builtin_ B.Or) [] in
+      Trustee_core.Conv.combine_l [
+        mk_ac and_;
+        mk_ac or_;
+        RW.Rule.(to_conv @@ mk_non_oriented (Th.axiom [] ((x === y) === (y === x))))
+      ]
+    in
+
+    let cache_ = E.Tbl.create 32 in
+
+    fun e ->
+      match E.Tbl.get cache_ e with
+      | Some u -> u
+      | None ->
+        let u =
+          let th = RW.bottom_up_apply conv ctx e in
+          match E.unfold_eq (Th.concl th) with
+          | Some (_, rhs) when not (E.equal e rhs) ->
+            Log.info (fun k->k"rewrite-normalize@ `%a`@ :into `%a`" E.pp e E.pp rhs);
+
+            begin
+              let th = RW.bottom_up_apply conv ctx rhs in
+              match E.unfold_eq (Th.concl th) with
+              | Some (_, rhs2) -> assert (E.equal rhs rhs2);
+              | None -> assert false
+            end;
+            (* todo check rw is idempotent *)
+            rhs
+          | Some _ -> e
+          | None -> assert false
+        in
+        E.Tbl.add cache_ e u;
+        u
 
   (** {2 Literal} *)
   module Lit : sig
@@ -246,12 +300,6 @@ module Make(A : ARG) : S = struct
 
   let is_not_ e = CCOpt.is_some (unfold_not_ e)
 
-  (* find builtin [b] *)
-  let get_builtin_ b =
-    match Problem.find_builtin b with
-    | Some c -> c
-    | None -> errorf (fun k->k"cannot find builtin %a" B.pp b)
-
   (* unfold builtin application. *)
   let unfold_builtin b e : _ list option =
     let cb = get_builtin_ b in
@@ -299,7 +347,7 @@ module Make(A : ARG) : S = struct
 
   let rec conv_term (t: Ast.term) : K.expr =
     let module T = Ast.Term in
-    Log.debug (fun k->k"conv-t %a" T.pp t);
+    Log.debug (fun k->k"conv-t `%a`" T.pp t);
     begin match T.view t with
       | T.App (f, l) ->
         let l = List.map conv_term l in
@@ -358,6 +406,13 @@ module Make(A : ARG) : S = struct
 
   module P = Ast.Proof
 
+  (* set of assumptions of the problem, normalized *)
+  let assertion_set = lazy (
+    Problem.assumptions ()
+    |> Seq.map normalize_expr_
+    |> E.Set.of_seq
+  )
+
   let rec check_step (_self:t) (step: Ast.Proof.composite_step) : unit =
     Log.debug (fun k->k"checking step %a" Ast.Proof.pp_composite_step step);
     assert false (* TODO *)
@@ -400,13 +455,22 @@ module Make(A : ARG) : S = struct
         true, Clause.of_thm (K.Thm.refl ctx t)
 
       | P.Assert t ->
-        Log.warn (fun k->k"TODO: find assert in assumptions");
-        (* FIXME: lookup in problem? *)
-        (* TODO: use theory mechanism to track asserts *)
-
         (* assume: [¬t \/ t] *)
-        let t = conv_term t in
-        true, Clause.singleton (Lit.make true t)
+        let t = conv_term t |> normalize_expr_ in
+
+        let lazy pb_assertions = assertion_set in
+        let is_asserted =
+          let t = normalize_expr_ t in
+          E.Set.mem t pb_assertions
+        in
+
+        if not is_asserted then (
+          Log.err (fun k->k"did not find@ `%a`@ in assertions" E.pp t);
+          Log.debug (fun k->k"assertions are: [@[%a@]]"
+                        (E.Set.pp (Fmt.within "`" "`" E.pp)) pb_assertions);
+        );
+
+        false, Clause.singleton (Lit.make true t)
 
       | P.Assert_c c ->
         (* FIXME: lookup in problem? *)

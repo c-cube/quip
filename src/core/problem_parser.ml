@@ -220,12 +220,24 @@ module Smtlib = struct
       | SA.Stmt_reset | SA.Stmt_reset_assertions | SA.Stmt_exit -> ()
     end
 
-  let parse_file_exn ctx filename : pb =
-    Log.debug (fun k->k"parse SMTLIB file '%s'" filename);
+  type input =
+    [ `File of string
+    | `Str of string
+    ]
+
+  let parse_ ctx (i:input) : pb =
     let pb =
-      try Smtlib_utils.V_2_6.parse_file_exn filename
-      with e ->
-        errorf "cannot parse smtlib file '%s':@.%s@." filename (Printexc.to_string e)
+      match i with
+      | `File filename ->
+        begin
+          try Smtlib_utils.V_2_6.parse_file_exn filename
+          with e ->
+            errorf "cannot parse smtlib file '%s':@.%s@." filename (Printexc.to_string e)
+          end
+      | `Str s ->
+        try Smtlib_utils.V_2_6.parse_string_exn s
+        with e ->
+          errorf "cannot parse string:@.%s@." (Printexc.to_string e)
     in
     Log.info (fun k->k"parsed %d statements" (List.length pb));
     Log.debug (fun k->k"@[<v2>problem:@ %a@]@." SA.(pp_list pp_stmt) pb);
@@ -243,10 +255,26 @@ module Smtlib = struct
     end in
     (module PB)
 
+  let parse_file_exn ctx filename =
+    Log.debug (fun k->k"parse SMTLIB file '%s'" filename);
+    parse_ ctx (`File filename)
+
   let parse_file ctx file =
     try Ok (parse_file_exn ctx file)
     with Error s -> Error s
+
+  let parse_string ctx s =
+    try Ok (parse_ ctx (`Str s))
+    with Error s -> Error s
 end
+
+type syn =
+  | Smt2
+  [@@deriving show, eq]
+
+let parse_string ctx ~syn s : _ result =
+  match syn with
+  | Smt2 -> Smtlib.parse_string ctx s
 
 let parse_file ctx filename : _ result =
   match Filename.extension filename with

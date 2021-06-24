@@ -1,0 +1,11 @@
+
+(executable
+  (name run_tests)
+  (modes native)
+  (flags :standard -warn-error -a+8)
+  (libraries containers quip.check quip.core trustee.core ounit2))
+
+(rule
+  (alias runtest)
+  (locks /test)
+  (action (run ./run_tests.exe -runner sequential -verbose false)))

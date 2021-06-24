@@ -11,4 +11,5 @@
     ppx_deriving
     (smtlib-utils (>= "0.3"))
     (ounit2 :with-test)
+    logs
     ))

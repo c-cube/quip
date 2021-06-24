@@ -12,4 +12,5 @@
     (smtlib-utils (>= "0.3"))
     (ounit2 :with-test)
     logs
+    (ocaml (>= "4.08"))
     ))

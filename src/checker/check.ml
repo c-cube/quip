@@ -1,7 +1,5 @@
 
 open Common
-module K = Trustee_core.Kernel
-module E = K.Expr
 module Ast = Quip_core.Ast
 module Parsed_pb = Quip_core.Parsed_pb
 
@@ -250,7 +248,7 @@ module Make(A : ARG) : S = struct
   let get_builtin_ b =
     match Problem.find_builtin b with
     | Some c -> c
-    | None -> errorf (fun k->k"cannot find builtin %a" B.pp b)
+    | None -> errorf "cannot find builtin %a" B.pp b
 
   (* unfold builtin application. *)
   let unfold_builtin b e : _ list option =
@@ -325,7 +323,7 @@ module Make(A : ARG) : S = struct
             begin match Problem.find_const_by_name v.name with
               | Some (c,_) -> K.Expr.const ctx c []
               | None ->
-                errorf(fun k->k"cannot convert unknown term@ `%a`" T.pp t)
+                errorf"cannot convert unknown term@ `%a`" T.pp t
             end
         end
       | T.Ite (a,b,c) ->
@@ -335,13 +333,13 @@ module Make(A : ARG) : S = struct
         let c = conv_term c in
         E.app_l ctx (E.const ctx ite [E.ty_exn b]) [a;b;c]
       | T.Fun _ ->
-        errorf (fun k->k"todo: conv lambda term `%a`" T.pp t)
+        errorf "todo: conv lambda term `%a`" T.pp t
       | T.Let _ ->
-        errorf (fun k->k"todo: conv let term `%a`" T.pp t)
+        errorf "todo: conv let term `%a`" T.pp t
 
       | _ ->
         (* TODO *)
-        errorf (fun k->k"todo: conv term `%a`" T.pp t)
+        errorf "todo: conv term `%a`" T.pp t
     end
 
   let conv_lit (lit: Ast.lit) : Lit.t =
@@ -362,7 +360,7 @@ module Make(A : ARG) : S = struct
     | Ast.Clause.Clause_ref name ->
       begin match Hashtbl.find st.named_clauses name with
         | exception Not_found ->
-          errorf (fun k->k"cannot find reference to clause %S" name)
+          errorf "cannot find reference to clause %S" name
         | c -> c
       end
 
@@ -383,10 +381,6 @@ module Make(A : ARG) : S = struct
     with
     | Error e ->
       Log.err (fun k->k"proof failed with %s" e);
-      st.n_invalid <- 1 + st.n_invalid;
-      Clause.empty
-    | Trustee_error.E e ->
-      Log.err (fun k->k"proof failed with %a" Trustee_error.pp e);
       st.n_invalid <- 1 + st.n_invalid;
       Clause.empty
 
@@ -442,7 +436,7 @@ module Make(A : ARG) : S = struct
         List.iter (fun (name,_) -> Hashtbl.remove st.checked name) asms;
 
         begin match r with
-          | None -> errorf (fun k->k"composite proof returns no clause")
+          | None -> errorf "composite proof returns no clause"
           | Some c -> true, c
         end
 
@@ -469,9 +463,8 @@ module Make(A : ARG) : S = struct
                | Some lit -> K.Thm.assume ctx (Lit.atom lit)
                | None ->
                  errorf
-                   (fun k->k
-                       "lemma-imply: hypothesis yields %a@ \
-                        but must have exactly one positive literal" Clause.pp c))
+                   "lemma-imply: hypothesis yields %a@ \
+                    but must have exactly one positive literal" Clause.pp c)
         in
 
         (* FIXME:
@@ -485,7 +478,7 @@ module Make(A : ARG) : S = struct
             Log.err (fun k->k"hyps: %a;@ concl: `@[%a@ = %a@]`"
                           Fmt.(Dump.list K.Thm.pp_quoted) hyps
                           E.pp t E.pp u);
-            errorf (fun k->k"failed to prove CC-lemma@ %a" P.pp p)
+            errorf "failed to prove CC-lemma@ %a" P.pp p
           | Some thm ->
             true, Clause.of_thm thm
         end
@@ -510,14 +503,14 @@ module Make(A : ARG) : S = struct
             begin match CC.prove_cc_bool ctx ps goal with
               | None ->
                 Log.err (fun k->k"clause: %a" Clause.pp c);
-                errorf (fun k->k"failed to prove !!! CC-lemma@ %a" P.pp p)
+                errorf "failed to prove !!! CC-lemma@ %a" P.pp p
               | Some thm ->
                 true, Clause.of_thm thm
             end
           | _ ->
             errorf
-              (fun k->k"cc-lemma: expected exactly one positive literal@ in %a"
-                  Fmt.(Dump.list Lit.pp) (Clause.lits_list c))
+              "cc-lemma: expected exactly one positive literal@ in %a"
+              Fmt.(Dump.list Lit.pp) (Clause.lits_list c)
           end
 
       | P.Res {pivot; p1; p2} ->
@@ -535,9 +528,9 @@ module Make(A : ARG) : S = struct
             true, res_on_ ~pivot:(Lit.atom lit) c1 c2
           | None, None ->
             errorf
-              (fun k->k"res1: expected one of the clauses to be unit@ \
-                        where c1=`%a`,@ c2=`%a`"
-                  Clause.pp c1 Clause.pp c2)
+              "res1: expected one of the clauses to be unit@ \
+               where c1=`%a`,@ c2=`%a`"
+              Clause.pp c1 Clause.pp c2
         end
 
       | P.Hres (init, steps) ->
@@ -580,7 +573,7 @@ module Make(A : ARG) : S = struct
         begin match E.unfold_app t_ite with
           | ite, [a;b;_c] when is_builtin_const_ B.If ite ->
             true, Clause.of_list [Lit.make false a; Lit.make true (E.app_eq ctx t_ite b)]
-          | _ -> errorf (fun k->k"expected a `ite` term,@ got `%a`" E.pp t_ite)
+          | _ -> errorf "expected a `ite` term,@ got `%a`" E.pp t_ite
         end
 
       | P.Ite_false t_ite ->
@@ -594,7 +587,7 @@ module Make(A : ARG) : S = struct
                 Lit.make true (E.app_eq ctx t_ite c)
               ] in
             true, c
-          | _ -> errorf (fun k->k"expected a `ite` term,@ got `%a`" E.pp t_ite)
+          | _ -> errorf "expected a `ite` term,@ got `%a`" E.pp t_ite
         end
 
       | P.DT_isa_split (_, _)
@@ -718,12 +711,12 @@ module Make(A : ARG) : S = struct
       if Clause.mem lit' c2 then (
         Clause.(union (remove lit c1) (remove lit' c2))
       ) else (
-        errorf (fun k->k"cannot resolve: pivot `%a`@ does not occur in `%a`"
-                   E.pp pivot Clause.pp c2)
+        errorf "cannot resolve: pivot `%a`@ does not occur in `%a`"
+          E.pp pivot Clause.pp c2
       )
 
     | None ->
-      errorf (fun k->k"cannot resolve %a@ on pivot `%a`" Clause.pp c1 E.pp pivot)
+      errorf "cannot resolve %a@ on pivot `%a`" Clause.pp c1 E.pp pivot
 
   (* do bool paramodulation between [c1] and [c2],
        where [c2] must contain [lhs = rhs] and [c1] must contain [lhs] *)
@@ -747,11 +740,11 @@ module Make(A : ARG) : S = struct
     with
     | None, _ ->
       errorf
-        (fun k->k"cannot perform bool paramod@ in `%a`:@ it does not contain `%a`"
-            Clause.pp c1 K.Expr.pp lhs)
+        "cannot perform bool paramod@ in `%a`:@ it does not contain `%a`"
+        Clause.pp c1 K.Expr.pp lhs
 
     | _, None ->
-      errorf (fun k->k"cannot do unit-paramod on %a" Clause.pp c2)
+      errorf "cannot do unit-paramod on %a" Clause.pp c2
 
     | Some lit_lhs, Some lit_eqn ->
       assert (Lit.sign lit_eqn);
@@ -775,8 +768,8 @@ module Make(A : ARG) : S = struct
         let c2 = check_proof_or_empty_ p in
         let pivot = match Clause.as_singleton c2 with
           | None ->
-            errorf (fun k->k"r1: clause `%a`@ does not have a unique positive literal"
-                       Clause.pp c2)
+            errorf "r1: clause `%a`@ does not have a unique positive literal"
+              Clause.pp c2
           | Some t -> Lit.atom t
         in
         res_on_ ~pivot c1 c2
@@ -789,9 +782,7 @@ module Make(A : ARG) : S = struct
 
       | P.P1 p ->
         let c2 = check_proof_or_empty_ p in
-        let fail() =
-          errorf (fun k->k"cannot do p1 on %a" Clause.pp c2);
-        in
+        let fail() = errorf "cannot do p1 on %a" Clause.pp c2 in
         match Clause.uniq_pos_lit c2 with
         | Some lit ->
           assert (Lit.sign lit);

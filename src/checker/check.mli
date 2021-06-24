@@ -1,8 +1,7 @@
 
 (** {1 Proof Checker} *)
 
-module K = Trustee_core.Kernel
-module E = K.Expr
+open Common
 
 type t
 

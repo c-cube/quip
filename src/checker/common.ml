@@ -1,10 +1,7 @@
 
 include Quip_core.Common
 
-module K = Trustee_core.Kernel
-module Log = Trustee_core.Log
+module Log = (val Logs.src_log (Logs.Src.create "quip.check"))
 
 module E = K.Expr
 module Thm = K.Thm
-
-include Trustee_core.Sigs

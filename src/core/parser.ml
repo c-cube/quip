@@ -83,12 +83,19 @@ module Proof = struct
     | List [{s=Atom "-";_}; t] -> A.Lit.na (t_of_sexp t)
     | _ -> parse_errorf sexp "expected `(± <term>)`"
 
+  let lits_of_sexp s : A.lit list =
+    match s.s with
+    | List ({s=Atom "cl";_} :: lits) -> List.map lit_of_sexp lits
+    | _ -> parse_errorf s "expected a clause `(cl t1 t2 … tn)`"
+
   let cl_of_sexp (s:sexp) : A.clause =
     match s.s with
+    | List [{s=Atom ("@"|"ref");_}; {s=Atom name;_}] ->
+      A.Clause.Clause_ref name
     | List ({s=Atom "cl";_} :: lits) ->
       let c_lits = List.map lit_of_sexp lits in
-      c_lits
-    | _ -> parse_errorf s "expected a clause `(cl t1 t2 … tn)`"
+      A.Clause.Clause c_lits
+    | _ -> parse_errorf s "expected a clause `(cl t1 t2 … tn)` or `(@ <name>)`"
 
   let asm_of_sexp s =
     match s.s with
@@ -197,7 +204,7 @@ module Proof = struct
       let t = t_of_sexp t in
       P.deft name t
     | List [{s=Atom "stepc";_}; {s=Atom name;_}; cl; sub_pr] ->
-      let cl = cl_of_sexp cl in
+      let cl = lits_of_sexp cl in
       let sub_pr = p_of_sexp sub_pr in
       P.stepc ~name cl sub_pr
     | _ -> parse_errorf s "expected a composite step (`deft` or `stepc`)"

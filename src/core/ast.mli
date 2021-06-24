@@ -1,6 +1,7 @@
 
 open Common
 
+(* TODO: structured name? like SMTLIB's composite identifiers *)
 module Name : sig
   type t = string
   [@@deriving show]
@@ -67,7 +68,10 @@ end
 type lit = Lit.t
 
 module Clause : sig
-  type t = lit list [@@deriving show]
+  type t =
+    | Clause of lit list
+    | Clause_ref of Name.t
+  [@@deriving show]
 end
 
 type clause = Clause.t
@@ -87,7 +91,7 @@ module Proof : sig
   type composite_step =
     | S_step_c of {
         name: string; (* name *)
-        res: clause; (* result of [proof] *)
+        res: lit list; (* result of [proof] *)
         proof: t; (* sub-proof *)
       }
     | S_define_t of string * term (* [const := t] *)
@@ -161,19 +165,19 @@ module Proof : sig
 
   val assertion : term -> t
   val ref_by_name : string -> t (* named clause, see {!defc} *)
-  val assertion_c : lit list -> t
+  val assertion_c : Clause.t -> t
   val hres_l : t -> hres_step list -> t (* hyper-res *)
   val res : pivot:term -> t -> t -> t
   val res1 : t -> t -> t
   val refl : term -> t (* proof of [| t=t] *)
   val true_is_true : t (* proof of [|- true] *)
   val true_neq_false : t (* proof of [|- not (true=false)] *)
-  val cc_lemma : lit list -> t
+  val cc_lemma : Clause.t -> t
   val cc_imply2 : t -> t -> term -> term -> t (* tautology [p1, p2 |- t=u] *)
   val cc_imply_l : t list -> term -> term -> t (* tautology [hyps |- t=u] *)
   val composite_l : ?assms:(string * lit) list -> composite_step list -> t
   val sorry : t
-  val sorry_c : lit list -> t
+  val sorry_c : Clause.t -> t
 
   val pp_debug : t Fmt.printer
 
@@ -187,5 +191,5 @@ module Proof : sig
   val ite_true : term -> t
   val ite_false : term -> t
 
-  val lra_l : lit list -> t
+  val lra_l : Clause.t -> t
 end

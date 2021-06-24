@@ -286,6 +286,7 @@ module Make(A : ARG) : S = struct
   type st = {
     checked: (string, Clause.t) Hashtbl.t;
     named_terms: (string, K.expr) Hashtbl.t;
+    named_clauses: (string, Clause.t) Hashtbl.t;
     mutable n_valid: int;
     mutable n_invalid: int;
     mutable n_steps: int;
@@ -293,7 +294,8 @@ module Make(A : ARG) : S = struct
 
   let st : st = {
     checked = Hashtbl.create 32;
-    named_terms = Hashtbl.create 32;
+    named_terms = Hashtbl.create 16;
+    named_clauses = Hashtbl.create 16;
     n_valid=0; n_invalid=0; n_steps=0;
   }
 
@@ -340,6 +342,11 @@ module Make(A : ARG) : S = struct
         let b = conv_term b in
         let c = conv_term c in
         E.app_l ctx (E.const ctx ite [E.ty_exn b]) [a;b;c]
+      | T.Fun _ ->
+        errorf (fun k->k"todo: conv lambda term `%a`" T.pp t)
+      | T.Let _ ->
+        errorf (fun k->k"todo: conv let term `%a`" T.pp t)
+
       | _ ->
         (* TODO *)
         errorf (fun k->k"todo: conv term `%a`" T.pp t)
@@ -349,12 +356,23 @@ module Make(A : ARG) : S = struct
     let {Ast.Lit.sign; atom} = lit in
     Lit.make sign (conv_term atom)
 
-  let conv_clause (c: Ast.clause) : Clause.t =
-    Log.debug (fun k->k"conv-clause %a" Ast.Clause.pp c);
+  let conv_lits (lits: Ast.lit list) : Clause.t =
+    Log.debug (fun k->k"conv-lits %a" (Fmt.Dump.list Ast.Lit.pp) lits);
     let cl = Clause.empty in
     List.fold_left
       (fun c lit -> Clause.add (conv_lit lit) c)
-      cl c
+      cl lits
+
+  let conv_clause (c: Ast.clause) : Clause.t =
+    Log.debug (fun k->k"conv-clause %a" Ast.Clause.pp c);
+    match c with
+    | Ast.Clause.Clause lits -> conv_lits lits
+    | Ast.Clause.Clause_ref name ->
+      begin match Hashtbl.find st.named_clauses name with
+        | exception Not_found ->
+          errorf (fun k->k"cannot find reference to clause %S" name)
+        | c -> c
+      end
 
   module P = Ast.Proof
 
@@ -805,12 +823,18 @@ module Make(A : ARG) : S = struct
 
     | P.S_step_c { name; res; proof } ->
 
+      (* first, convert clause declared with this step.
+         It is named [name] in [proof]. *)
+      let expected_c = conv_lits res in
+      Hashtbl.add st.named_clauses name expected_c;
+
       Log.info (fun k->k"check step '%s'" name);
+
       let c = check_proof_or_empty_ proof in
       Log.debug (fun k->k"step '%s'@ yields %a" name Clause.pp c);
 
-      (* clause declared with this step *)
-      let expected_c = conv_clause res in
+      (* named clause goes out of scope *)
+      Hashtbl.remove st.named_clauses name;
 
       let c =
         if Clause.subset c expected_c then (

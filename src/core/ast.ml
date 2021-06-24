@@ -100,9 +100,14 @@ end
 type lit = Lit.t [@@deriving show]
 
 module Clause = struct
-  type t = lit list
+  type t =
+    | Clause of lit list
+    | Clause_ref of Name.t
   let pp out (c:t) =
-    Fmt.fprintf out "(@[cl@ %a@])" Fmt.(list ~sep:(return "@ ") Lit.pp) c
+    match c with
+    | Clause lits ->
+      Fmt.fprintf out "(@[cl@ %a@])" Fmt.(list ~sep:(return "@ ") Lit.pp) lits
+    | Clause_ref n -> Fmt.fprintf out "(@[@@ %s@])" n
   let show = Fmt.to_string pp
 end
 
@@ -159,7 +164,7 @@ module Proof = struct
   and composite_step =
     | S_step_c of {
         name: string; (* name *)
-        res: clause; (* result of [proof] *)
+        res: lit list; (* result of [proof] *)
         proof: t; (* sub-proof *)
       }
     | S_define_t of string * term (* [const := t] *)

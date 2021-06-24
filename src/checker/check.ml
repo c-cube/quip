@@ -42,9 +42,7 @@ module Make(A : ARG) : S = struct
       in
       K.Expr.const ctx c []
 
-    let false_ : K.expr = find_ "false" Quip_core.Builtin.False
     let not_ : K.expr = find_ "not" Quip_core.Builtin.Not
-    let bool = E.bool ctx
   end
 
   (* always normalize equations so that the order in which they were
@@ -54,6 +52,8 @@ module Make(A : ARG) : S = struct
     | Some (a,b) when E.compare a b < 0 ->
       E.app_eq ctx b a
     | _ -> e
+
+  [@@@ocaml.warning "-32"]
 
   (** {2 Literal} *)
   module Lit : sig
@@ -89,7 +89,7 @@ module Make(A : ARG) : S = struct
 
   (** {2 Direct form clause} *)
   module Clause : sig
-    type t [@@deriving show, ord, eq]
+    type t [@@deriving show, eq]
     val empty : t
     val of_list : Lit.t list -> t
     val of_iter : Lit.t Iter.t -> t
@@ -228,6 +228,8 @@ module Make(A : ARG) : S = struct
         (K.Thm.hyps_iter th)
   end
 
+  [@@@ocaml.warning "+32"]
+
   (* if [e] the builtin [b]? *)
   let is_builtin_const_ b (e:E.t) : bool =
     match E.view e with
@@ -243,8 +245,6 @@ module Make(A : ARG) : S = struct
     match E.view e with
     | E.E_app (f, u) when E.equal f Cst.not_ -> Some u
     | _ -> None
-
-  let is_not_ e = CCOpt.is_some (unfold_not_ e)
 
   (* find builtin [b] *)
   let get_builtin_ b =
@@ -274,14 +274,6 @@ module Make(A : ARG) : S = struct
       | _ -> None
     in
     aux e
-
-  let unfold_builtin1 b e =
-    unfold_builtin b e
-    |> CCOpt.flat_map (function [x] -> Some x | _ -> None)
-
-  let unfold_builtin2 b e =
-    unfold_builtin b e
-    |> CCOpt.flat_map (function [x;y] -> Some (x,y) | _ -> None)
 
   type st = {
     checked: (string, Clause.t) Hashtbl.t;
@@ -376,13 +368,9 @@ module Make(A : ARG) : S = struct
 
   module P = Ast.Proof
 
-  let rec check_step (_self:t) (step: Ast.Proof.composite_step) : unit =
-    Log.debug (fun k->k"checking step %a" Ast.Proof.pp_composite_step step);
-    assert false (* TODO *)
-
   (* check [p], returns its resulting clause.
      In case of error this returns the empty clause. *)
-  and check_proof_or_empty_ p : Clause.t =
+  let rec check_proof_or_empty_ p : Clause.t =
     st.n_steps <- 1 + st.n_steps;
     try
       let ok, c = check_proof_rec_exn p in

@@ -55,11 +55,10 @@ module Make() = struct
   let l = [
     (__LINE__, true, prelude0,
     {|(quip 1 (steps () (
-        (stepc c0 (cl (+ (p1 a))) (assert-c (cl (+ (p1 a)))))
-        (stepc c1 (cl (- (p1 b))) (assert-c (cl (- (p1 b)))))
-        (stepc c2 (cl (+ (= a b))) (assert-c (cl (+ (= a b)))))
-        (stepc c3 (cl (- (= a b)) (- (p1 a)) (+ (p1 b)))
-          (ccl (cl (- (= a b)) (- (p1 a)) (+ (p1 b)))))
+        (stepc c0 (cl (+ (p1 a))) (assert-c (@ c0)))
+        (stepc c1 (cl (- (p1 b))) (assert-c (@ c1)))
+        (stepc c2 (cl (+ (= a b))) (assert-c (@ c2)))
+        (stepc c3 (cl (- (= a b)) (- (p1 a)) (+ (p1 b))) (ccl (@ c3)))
         (stepc c4 (cl) (hres (@ c3) ((r1 (@ c0)) (r1 (@ c1)) (r1 (@ c2))))))))
         |});
   ]

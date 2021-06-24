@@ -20,7 +20,10 @@ jobs:
     - uses: ocaml/setup-ocaml@v2
       with:
         ocaml-compiler: ${{ matrix.ocaml-compiler }}
-    - run: opam pin -n .
+        opam-pin: false  # need to pin vendored dep first
+        opam-depext: false
+    - run: opam pin vendor/trustee#HEAD -y -n
+    - run: opam pin -y -n .
     - run: opam depext -yt quip
     - run: opam install -t . --deps-only
     - run: opam exec -- dune build

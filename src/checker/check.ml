@@ -100,6 +100,7 @@ module Make(A : ARG) : S = struct
     val union : t -> t -> t
     val to_iter : t -> Lit.t Iter.t
 
+    val subst : recursive:bool -> t -> K.Subst.t -> t
     val lits : t -> Lit.t Iter.t
 
     val pos_lits : t -> Lit.t Iter.t
@@ -215,6 +216,18 @@ module Make(A : ARG) : S = struct
     let uniq_pos_lit self = uniq_lit_of_sign_ true self
     let uniq_neg_lit self = uniq_lit_of_sign_ false self
 
+    let subst ~recursive self subst : t =
+      if K.Subst.is_empty subst then self
+      else (
+        to_iter self
+        |> Iter.map
+          (fun lit ->
+            let sign = Lit.sign lit in
+            let e = E.subst ~recursive ctx (Lit.atom lit) subst in
+            Lit.make sign e)
+        |> of_iter
+      )
+
     let of_thm th =
       let concl = K.Thm.concl th in
       let c = singleton (Lit.make true concl) in
@@ -289,6 +302,22 @@ module Make(A : ARG) : S = struct
     n_valid=0; n_invalid=0; n_steps=0;
   }
 
+  let rec conv_ty (ty: Ast.ty) : K.ty =
+    match ty with
+    | Ast.Ty.Arrow (args, ret) ->
+      let args = List.map conv_ty args in
+      let ret = conv_ty ret in
+      E.arrow_l ctx args ret
+    | Ast.Ty.Constr (s, args) ->
+      (* FIXME: type variables *)
+      begin match Problem.find_ty_const_by_name s with
+        | None ->
+          errorf "cannot convert unknown type constant `%s`" s
+        | Some c ->
+          let args = List.map conv_ty args in
+          E.const ctx c args
+      end
+
   let rec conv_term (t: Ast.term) : K.expr =
     let module T = Ast.Term in
     Log.debug (fun k->k"conv-t %a" T.pp t);
@@ -323,7 +352,13 @@ module Make(A : ARG) : S = struct
             begin match Problem.find_const_by_name v.name with
               | Some (c,_) -> K.Expr.const ctx c []
               | None ->
-                errorf"cannot convert unknown term@ `%a`" T.pp t
+                begin match v.ty with
+                  | Some ty ->
+                    let ty = conv_ty ty in
+                    E.var_name ctx v.name ty
+                  | None ->
+                    errorf"cannot convert unknown variable@ `%a`" T.pp t
+                end
             end
         end
       | T.Ite (a,b,c) ->
@@ -341,6 +376,14 @@ module Make(A : ARG) : S = struct
         (* TODO *)
         errorf "todo: conv term `%a`" T.pp t
     end
+
+  let conv_subst (s:Ast.Subst.t) : K.Subst.t =
+    List.fold_left
+      (fun s (v,t) ->
+         let t = conv_term t in
+         let v = K.Var.make v.Ast.Var.name (E.ty_exn t) in
+         K.Subst.bind s v t)
+      K.Subst.empty s
 
   let conv_lit (lit: Ast.lit) : Lit.t =
     let {Ast.Lit.sign; atom} = lit in
@@ -503,7 +546,7 @@ module Make(A : ARG) : S = struct
             begin match CC.prove_cc_bool ctx ps goal with
               | None ->
                 Log.err (fun k->k"clause: %a" Clause.pp c);
-                errorf "failed to prove !!! CC-lemma@ %a" P.pp p
+                errorf "failed to prove@ %a" P.pp p
               | Some thm ->
                 true, Clause.of_thm thm
             end
@@ -532,6 +575,13 @@ module Make(A : ARG) : S = struct
                where c1=`%a`,@ c2=`%a`"
               Clause.pp c1 Clause.pp c2
         end
+
+      | P.Subst (subst, p1) ->
+        let ok, p1 = check_proof_rec_exn p1 in
+        if ok then (
+          let subst = conv_subst subst in
+          true, Clause.subst ~recursive:false p1 subst
+        ) else ok, p1
 
       | P.Hres (init, steps) ->
 

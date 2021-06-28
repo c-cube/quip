@@ -43,7 +43,19 @@ module Proof = struct
       ("@[<v>at %a@ in %a:@ " ^^ fmt ^^ "@]")
       Loc.pp_opt s.loc SP.pp (truncate_sexp_ ~d:2 s)
 
-  let ty_of_sexp _s : A.Ty.t = assert false
+  let rec ty_of_sexp s : A.Ty.t =
+    match s.s with
+    | Atom name -> A.Ty.constr name []
+    | List ({s=Atom "->";_} :: (_::_ as args)) ->
+      let rargs = List.rev_map ty_of_sexp args in
+      begin match rargs with
+        | ret :: l -> A.Ty.arrow (List.rev l) ret
+        | [] -> assert false
+      end
+    | List ({s=Atom name;_} :: args) ->
+      let args = List.map ty_of_sexp args in
+      A.Ty.constr name args
+    | _ -> parse_errorf s "expected type"
 
   let t_of_sexp (sexp:sexp) : T.t =
     let rec loop s : T.t =
@@ -51,14 +63,10 @@ module Proof = struct
       match s.s with
       | Atom name -> T.const ~loc name
       | List [{s=Atom "=";_}; a; b] -> T.eq ~loc (loop a) (loop b)
-                                         (*
-      | List [{s=Atom "!";_}; a; {s=Atom ":named";_}; {s=Atom name;_}] ->
-        let u = loop a in
-        Hashtbl.add self.named_terms name u;
-        u
-      | List ({s=Atom "!";_} :: _) ->
-        parse_errorf s "unimplemented `!`" (* TODO: named expr *)
-                                            *)
+
+      | List [{s=Atom "?";_}; {s=Atom name;_}; ty] ->
+        let ty = ty_of_sexp ty in
+        T.var ~loc (A.Var.make ~ty:(Some ty) name)
       | List [{s=Atom "let";_}; {s=List l;_}; bod] ->
         let l = List.map (function
             | {s=List [{s=Atom v;_}; t];_} -> A.Var.make ~ty:() v, loop t
@@ -74,8 +82,33 @@ module Proof = struct
       | List ({s=Atom f;_} :: args) ->
         let args = List.map loop args in
         T.app_name ~loc f args
+
+      (*
+      | List [{s=Atom "!";_}; a; {s=Atom ":named";_}; {s=Atom name;_}] ->
+        let u = loop a in
+        Hashtbl.add self.named_terms name u;
+        u
+      | List ({s=Atom "!";_} :: _) ->
+        parse_errorf s "unimplemented `!`" (* TODO: named expr from input problem? *)
+      *)
+
       | _ -> parse_errorf s "expected term"
     in loop sexp
+
+  let s_of_sexp (sexp:sexp) : A.Subst.t =
+    let rec of_l = function
+      | [] -> []
+      | {s=Atom v;_} :: t :: tl ->
+        let v = Ast.Var.make ~ty:() v in
+        let t = t_of_sexp t in
+        (v,t) :: of_l tl
+      | s :: _ :: _ ->
+        parse_errorf s "expected a variable"
+      | [_] -> parse_errorf sexp "substitution must have even number of arguments"
+    in
+    match sexp.s with
+    | List l -> of_l l
+    | Atom _ -> parse_errorf sexp "expected substitution of shape `(<var> <term> …)`"
 
   let lit_of_sexp (sexp:sexp) : A.lit =
     match sexp.s with
@@ -183,6 +216,11 @@ module Proof = struct
       in
       let init = p_of_sexp init in
       P.hres_l init (CCList.map pstep steps)
+
+    | List [{s=Atom "subst";_}; subst; p] ->
+      let subst = s_of_sexp subst in
+      let p = p_of_sexp p in
+      P.subst subst p
 
     | List [{s=Atom "assert";_}; t] ->
       P.assertion (t_of_sexp t)

@@ -12,6 +12,9 @@ module Ty : sig
     | Constr of Name.t * t list
     | Arrow of t list * t
   [@@deriving show]
+
+  val constr : Name.t -> t list -> t
+  val arrow : t list -> t -> t
 end
 
 type ty = Ty.t
@@ -29,7 +32,7 @@ module Term : sig
   type ('t,'ty) view =
     | App of 't * 't list
     | Fun of 'ty Var.t * 't
-    | Var of unit Var.t
+    | Var of 'ty option Var.t
     | Ite of 't * 't * 't
     | As of 't * Ty.t (* cast *)
     | Let of (unit Var.t * 't) list * 't
@@ -42,9 +45,9 @@ module Term : sig
   val loc : t -> Loc.t option
   val map_shallow : (t -> t) -> t -> t
 
-  val var : loc:Loc.t option -> unit Var.t -> t
+  val var : loc:Loc.t option -> Ty.t option Var.t -> t
   val eq : loc:Loc.t option -> t -> t -> t
-  val app_var : loc:Loc.t option -> unit Var.t -> t list -> t
+  val app_var : loc:Loc.t option -> Ty.t option Var.t -> t list -> t
   val app_name : loc:Loc.t option -> Name.t -> t list -> t
   val const : loc:Loc.t option -> Name.t -> t
   val let_ : loc:Loc.t option -> (unit Var.t * t) list -> t -> t
@@ -53,6 +56,11 @@ module Term : sig
 end
 
 type term = Term.t
+
+module Subst : sig
+  type t = (unit Var.t * Term.t) list
+  [@@deriving show]
+end
 
 module Lit : sig
   type t = {
@@ -124,6 +132,7 @@ module Proof : sig
     | Hres of t * hres_step list
     | Res of { pivot: term; p1: t; p2: t }
     | Res1 of { p1: t; p2: t }
+    | Subst of Subst.t * t
     | DT_isa_split of ty * term list
     | DT_isa_disj of ty * term * term
     | DT_cstor_inj of Name.t * int * term list * term list (* [c t…=c u… |- t_i=u_i] *)
@@ -169,6 +178,7 @@ module Proof : sig
   val hres_l : t -> hres_step list -> t (* hyper-res *)
   val res : pivot:term -> t -> t -> t
   val res1 : t -> t -> t
+  val subst : Subst.t -> t -> t
   val refl : term -> t (* proof of [| t=t] *)
   val true_is_true : t (* proof of [|- true] *)
   val true_neq_false : t (* proof of [|- not (true=false)] *)

@@ -12,6 +12,9 @@ module Ty = struct
     | Constr of Name.t * t list
     | Arrow of t list * t
   [@@deriving show]
+
+  let constr name args : t = Constr(name,args)
+  let arrow args ret : t = Arrow (args,ret)
 end
 
 type ty = Ty.t [@@deriving show]
@@ -34,7 +37,7 @@ module Term = struct
   type ('t,'ty) view =
     | App of 't * 't list
     | Fun of 'ty Var.t * 't
-    | Var of unit Var.t
+    | Var of 'ty option Var.t
     | Ite of 't * 't * 't
     | As of 't * Ty.t (* cast *)
     | Let of (unit Var.t * 't) list * 't
@@ -56,7 +59,7 @@ module Term = struct
   let app_var ~loc v l : t =
     let v = var ~loc v in
     if l=[] then v else mk_ ~loc (App (v, l))
-  let app_name ~loc v l : t = app_var ~loc (Var.make ~ty:() v) l
+  let app_name ~loc v l : t = app_var ~loc (Var.make ~ty:None v) l
   let const ~loc c = app_name ~loc c []
   let eq ~loc a b : t = app_name ~loc "=" [a;b]
   let let_ ~loc bs bod : t = mk_ ~loc (Let (bs,bod))
@@ -79,6 +82,11 @@ module Term = struct
 end
 
 type term = Term.t [@@deriving show]
+
+module Subst = struct
+  type t = (unit Var.t * Term.t) list
+  [@@deriving show]
+end
 
 module Lit = struct
   type t = {
@@ -126,6 +134,7 @@ module Proof = struct
     | Hres of t * hres_step list
     | Res of { pivot: term; p1: t; p2: t }
     | Res1 of { p1: t; p2: t }
+    | Subst of Subst.t * t
     | DT_isa_split of ty * term list
     | DT_isa_disj of ty * term * term
     | DT_cstor_inj of Name.t * int * term list * term list (* [c t…=c u… |- t_i=u_i] *)
@@ -230,6 +239,7 @@ module Proof = struct
   let hres_l c l : t = Hres (c,l)
   let res ~pivot p1 p2 : t = Res{pivot;p1;p2}
   let res1 p1 p2 : t = Res1{p1;p2}
+  let subst s p : t = Subst(s,p)
 
   let lra_l c : t = LRA c
 
@@ -257,6 +267,7 @@ module Proof = struct
         l
     | Res {pivot;p1;p2} -> f_t pivot; f_p p1; f_p p2
     | Res1 {p1;p2} -> f_p p1; f_p p2
+    | Subst (s,p) -> List.iter (fun (_v,t) -> f_t t) s; f_p p;
     | DT_isa_split (_, l) -> List.iter f_t l
     | DT_isa_disj (_, t, u) -> f_t t; f_t u
     | DT_cstor_inj (_, _c, ts, us) -> List.iter f_t ts; List.iter f_t us

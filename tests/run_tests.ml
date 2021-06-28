@@ -26,7 +26,7 @@ module Make() = struct
   let _debug = try Sys.getenv "DEBUG"="1" with _ -> false
   let () =
     Logs.set_reporter (Logs.format_reporter());
-    Logs.set_level ~all:true (Some (if _debug then Logs.Debug else Logs.Warning));
+    Logs.set_level ~all:true (if _debug then Some Logs.Debug else None);
     Logs.Src.set_level _src (Some (if _debug then Logs.Debug else Logs.Info))
 
   let test_proof ~expect line pb proof =
@@ -53,6 +53,7 @@ module Make() = struct
   |}
 
   let l = [
+    (* basic CC *)
     (__LINE__, true, prelude0,
     {|(quip 1 (steps () (
         (stepc c0 (cl (+ (p1 a))) (assert-c (@ c0)))
@@ -61,6 +62,37 @@ module Make() = struct
         (stepc c3 (cl (- (= a b)) (- (p1 a)) (+ (p1 b))) (ccl (@ c3)))
         (stepc c4 (cl) (hres (@ c3) ((r1 (@ c0)) (r1 (@ c1)) (r1 (@ c2))))))))
         |});
+    (* basic CC with bool *)
+    (__LINE__, true, prelude0,
+     {|(quip 1 (steps () (
+        (stepc c0 (cl (+ (= (f1 b) a))) (assert-c (@ c0)))
+        (stepc c1 (cl (+ (p1 (f1 a)))) (assert-c (@ c1)))
+        (stepc c2 (cl (+ (= b a))) (assert-c (@ c2)))
+        (stepc c3 (cl (- (p1 b))) (assert-c (@ c3)))
+        (stepc lemma
+         (cl (- (p1 (f1 a))) (- (= (f1 b) a)) (- (= b a)) (+ (p1 b)))
+         (ccl (@ lemma)))
+        (stepc c4 (cl) (hres (@ lemma) ((r1 (@ c3)) (r1 (@ c2)) (r1 (@ c1)) (r1 (@ c0)))))
+    )))|});
+    (* bad CC lemma *)
+    (__LINE__, false, prelude0,
+     {|(quip 1 (steps () (
+        (stepc lemma
+         (cl (- (p1 (f1 a))) (- (= (f1 b) a)) (- (= c a)) (+ (p1 b)))
+         (ccl (@ lemma)))
+       )))|});
+    (* basic subst *)
+    (__LINE__, true, prelude0,
+     {|(quip 1 (steps () (
+        (stepc c0 (cl (+ (= (f2 (? x U) b) (? x U)))) (assert-c (@ c0)))
+        (stepc c2 (cl (+ (p1 (f2 a b)))) (assert-c (@ c2)))
+        (stepc c3 (cl (- (p1 a))) (assert-c (@ c3)))
+        (stepc c4 (cl (+ (= (f2 a b) a))) (subst (x a) (ref c0)))
+        (stepc c5
+          (cl (- (= (f2 a b) a)) (- (p1 (f2 a b))) (+ (p1 a))) (ccl (@ c5)))
+        (stepc c6 (cl)
+          (hres (@ c5) ((r1 (@ c4)) (r1 (@ c3)) (r1 (@ c2)))))
+    )))|});
   ]
 
   let suite =

@@ -57,6 +57,8 @@ end
 
 type term = Term.t
 
+type with_bindings = (Name.t * term) list
+
 module Subst : sig
   type t = (unit Var.t * Term.t) list
   [@@deriving show]
@@ -144,6 +146,7 @@ module Proof : sig
     | Ite_true of term (* given [if a b c] returns [a=T |- if a b c=b] *)
     | Ite_false of term
     | LRA of clause
+    | With of with_bindings * t
     | Composite of {
         (* some named (atomic) assumptions *)
         assumptions: (string * lit) list;
@@ -188,6 +191,8 @@ module Proof : sig
   val composite_l : ?assms:(string * lit) list -> composite_step list -> t
   val sorry : t
   val sorry_c : Clause.t -> t
+
+  val with_ : with_bindings -> t -> t
 
   val pp_debug : t Fmt.printer
 

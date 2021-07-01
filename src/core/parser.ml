@@ -144,6 +144,17 @@ module Proof = struct
       let steps = List.map step_of_sexp steps in
       P.composite_l ~assms steps
 
+    | List [{s=Atom "with";_}; {s=List bs;_}; p1] ->
+      let bs = List.map (function
+          | {s=List [{s=Atom name;_}; t];_} ->
+            let t = t_of_sexp t in
+            name, t
+          | sexp -> parse_errorf sexp "expected pair `(<name> <term>)`")
+          bs
+      in
+      let p1 = p_of_sexp p1 in
+      P.with_ bs p1
+
     | List [{s=Atom "ccl";_}; cl] ->
       let cl = cl_of_sexp cl in
       P.cc_lemma cl

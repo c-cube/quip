@@ -64,16 +64,18 @@ module Make() = struct
         |});
     (* basic CC with bool *)
     (__LINE__, true, prelude0,
-     {|(quip 1 (steps () (
+     {|(quip 1
+        (with ((fa (f1 a)))
+        (steps () (
         (stepc c0 (cl (+ (= (f1 b) a))) (assert-c (@ c0)))
-        (stepc c1 (cl (+ (p1 (f1 a)))) (assert-c (@ c1)))
+        (stepc c1 (cl (+ (p1 fa))) (assert-c (@ c1)))
         (stepc c2 (cl (+ (= b a))) (assert-c (@ c2)))
         (stepc c3 (cl (- (p1 b))) (assert-c (@ c3)))
         (stepc lemma
-         (cl (- (p1 (f1 a))) (- (= (f1 b) a)) (- (= b a)) (+ (p1 b)))
+         (cl (- (p1 fa)) (- (= (f1 b) a)) (- (= b a)) (+ (p1 b)))
          (ccl (@ lemma)))
         (stepc c4 (cl) (hres (@ lemma) ((r1 (@ c3)) (r1 (@ c2)) (r1 (@ c1)) (r1 (@ c0)))))
-    )))|});
+    ))))|});
     (* bad CC lemma *)
     (__LINE__, false, prelude0,
      {|(quip 1 (steps () (

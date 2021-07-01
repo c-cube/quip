@@ -640,6 +640,17 @@ module Make(A : ARG) : S = struct
           | _ -> errorf "expected a `ite` term,@ got `%a`" E.pp t_ite
         end
 
+      | P.With (bs, p) ->
+        (* locally define [bs], check [p], then remove bindings *)
+        List.iter
+          (fun (v,t) ->
+            let t = conv_term t in
+            Hashtbl.add st.named_terms v t)
+          bs;
+        CCFun.finally1
+          ~h:(fun () -> List.iter (fun (n,_) -> Hashtbl.remove st.named_terms n) bs)
+          check_proof_rec_exn p
+
       | P.DT_isa_split (_, _)
       | P.DT_isa_disj (_, _, _)
       | P.DT_cstor_inj (_, _, _, _)

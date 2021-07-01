@@ -83,6 +83,8 @@ end
 
 type term = Term.t [@@deriving show]
 
+type with_bindings = (Name.t * term) list [@@deriving show]
+
 module Subst = struct
   type t = (unit Var.t * Term.t) list
   [@@deriving show]
@@ -146,6 +148,7 @@ module Proof = struct
     | Ite_true of term (* given [if a b c] returns [a=T |- if a b c=b] *)
     | Ite_false of term
     | LRA of clause
+    | With of with_bindings * t
     | Composite of {
         (* some named (atomic) assumptions *)
         assumptions: (string * lit) list;
@@ -224,6 +227,8 @@ module Proof = struct
   let composite_l ?(assms=[]) steps : t =
     Composite {assumptions=assms; steps=Array.of_list steps}
 
+  let with_ bs p : t = With (bs,p)
+
   let isa_split ty l = DT_isa_split (ty, l)
   let isa_disj ty t u = DT_isa_disj (ty, t, u)
   let cstor_inj c i t u = DT_cstor_inj (c, i, t, u)
@@ -277,6 +282,7 @@ module Proof = struct
     | Nn p -> f_p p
     | Ite_true t | Ite_false t -> f_t t
     | LRA c -> f_clause c
+    | With (bs,p) -> List.iter (fun (_,t) -> f_t t) bs; f_p p
     | Composite { assumptions; steps } ->
       List.iter (fun (_,lit) -> iter_lit ~f_t lit) assumptions;
       Array.iter f_step steps;

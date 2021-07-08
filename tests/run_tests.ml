@@ -49,10 +49,21 @@ module Make() = struct
     (declare-fun g1 (U) U)
     (declare-fun f2 (U U) U)
     (declare-fun g2 (U U) U)
+    (declare-fun p0 () Bool)
+    (declare-fun q0 () Bool)
     (declare-fun p1 (U) Bool)
+    (declare-fun q1 (U) Bool)
   |}
 
   let l = [
+    (* test resolution + toplevel-style proof *)
+    (__LINE__, true, prelude0,
+    {|(quip 1)
+      (stepc c0 (cl (+ p0)) (assert-c (@ c0)))
+      (stepc c1 (cl (- p0) (+ q0)) (assert-c (@ c1)))
+      (stepc c2 (cl (- q0)) (assert-c (@ c2)))
+      (stepc c3 (cl) (hres (@ c0) ((r p0 (@ c1)) (r1 (@ c2)))))
+    |});
     (* basic CC *)
     (__LINE__, true, prelude0,
     {|(quip 1 (steps () (

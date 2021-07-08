@@ -258,25 +258,21 @@ module Proof = struct
       P.stepc ~name cl sub_pr
     | _ -> parse_errorf s "expected a composite step (`deft` or `stepc`)"
 
-  let parse_sexp_ (s:sexp) : P.t =
-    match s.s with
-    | List [{s=Atom "quip";_}; {s=Atom "1";_}; bod] -> p_of_sexp bod
-    | _ -> parse_errorf s "expected `(quip 1 <proof>)`"
+  let parse_sexp_l_ (l:sexp list) : P.t =
+    match l with
+    | [{s=List [{s=Atom "quip";_}; {s=Atom "1";_}; bod];_}] -> p_of_sexp bod
+    | {s=List [{s=Atom "quip";_}; {s=Atom "1";_}];_} :: steps ->
+      let steps = List.map step_of_sexp steps in
+      P.composite_l ~assms:[] steps
+    | s1 :: _ -> parse_errorf s1 "expected `(quip 1 <proof>)` or `(quip 1) <steps>"
+    | [] -> errorf "expected `(quip 1 <proof>)` or `(quip 1) <steps>"
 
   let parse_lexbuf_ ~filename lexbuf : P.t =
     Loc.set_file lexbuf filename;
     let dec = SP.Decoder.of_lexbuf lexbuf in
-    let s =
-      match SP.Decoder.next dec with
-      | SP.Yield s ->
-        begin match SP.Decoder.next dec with
-          | SP.End -> s
-          | _ -> errorf "expected file to end after first expression"
-        end
-      | SP.Fail e -> errorf "parse error in %s: %s" filename e
-      | SP.End -> error "unexpected end of file, expected sexp"
-    in
-    parse_sexp_ s
+    match SP.Decoder.to_list dec with
+    | Ok l -> parse_sexp_l_ l
+    | Error e -> errorf "expected proof (list of S-expressions), but:@ %s" e
 
   let parse_string ?(filename="<string>") (s:string) : P.t =
     let lexbuf = Lexing.from_string s in

@@ -29,7 +29,10 @@ module Make() = struct
     Logs.set_level ~all:true (if _debug then Some Logs.Debug else None);
     Logs.Src.set_level _src (Some (if _debug then Logs.Debug else Logs.Info))
 
+  let mk_test_ line k = Printf.sprintf "line %d" line >:: k
+
   let test_proof ~expect line pb proof =
+    mk_test_ line @@ fun _ctx ->
     let pb = parse_pb_str line pb in
     let proof = parse_proof_str line proof in
     let checker = Check.create ctx pb in
@@ -57,24 +60,24 @@ module Make() = struct
 
   let l = [
     (* test resolution + toplevel-style proof *)
-    (__LINE__, true, prelude0,
+    test_proof ~expect:true __LINE__ prelude0
     {|(quip 1)
       (stepc c0 (cl (+ p0)) (assert-c (@ c0)))
       (stepc c1 (cl (- p0) (+ q0)) (assert-c (@ c1)))
       (stepc c2 (cl (- q0)) (assert-c (@ c2)))
       (stepc c3 (cl) (hres (@ c0) ((r p0 (@ c1)) (r1 (@ c2)))))
-    |});
+    |};
     (* basic CC *)
-    (__LINE__, true, prelude0,
+    test_proof ~expect:true __LINE__ prelude0
     {|(quip 1 (steps () (
         (stepc c0 (cl (+ (p1 a))) (assert-c (@ c0)))
         (stepc c1 (cl (- (p1 b))) (assert-c (@ c1)))
         (stepc c2 (cl (+ (= a b))) (assert-c (@ c2)))
         (stepc c3 (cl (- (= a b)) (- (p1 a)) (+ (p1 b))) (ccl (@ c3)))
         (stepc c4 (cl) (hres (@ c3) ((r1 (@ c0)) (r1 (@ c1)) (r1 (@ c2))))))))
-        |});
+        |};
     (* basic CC with bool *)
-    (__LINE__, true, prelude0,
+    test_proof ~expect:true __LINE__ prelude0
      {|(quip 1
         (with ((fa (f1 a)))
         (steps () (
@@ -86,16 +89,16 @@ module Make() = struct
          (cl (- (p1 fa)) (- (= (f1 b) a)) (- (= b a)) (+ (p1 b)))
          (ccl (@ lemma)))
         (stepc c4 (cl) (hres (@ lemma) ((r1 (@ c3)) (r1 (@ c2)) (r1 (@ c1)) (r1 (@ c0)))))
-    ))))|});
+    ))))|};
     (* bad CC lemma *)
-    (__LINE__, false, prelude0,
+    test_proof ~expect:false __LINE__ prelude0
      {|(quip 1 (steps () (
         (stepc lemma
          (cl (- (p1 (f1 a))) (- (= (f1 b) a)) (- (= c a)) (+ (p1 b)))
          (ccl (@ lemma)))
-       )))|});
+       )))|};
     (* basic subst *)
-    (__LINE__, true, prelude0,
+    test_proof ~expect:true __LINE__ prelude0
      {|(quip 1 (steps () (
         (stepc c0 (cl (+ (= (f2 (? x U) b) (? x U)))) (assert-c (@ c0)))
         (stepc c2 (cl (+ (p1 (f2 a b)))) (assert-c (@ c2)))
@@ -105,16 +108,23 @@ module Make() = struct
           (cl (- (= (f2 a b) a)) (- (p1 (f2 a b))) (+ (p1 a))) (ccl (@ c5)))
         (stepc c6 (cl)
           (hres (@ c5) ((r1 (@ c4)) (r1 (@ c3)) (r1 (@ c2)))))
-    )))|});
+    )))|};
+    (* self contained proof *)
+    test_proof ~expect:true __LINE__ ""
+    {|(quip 1)
+      (ty_decl u 0)
+      (decl a u)
+      (decl b u)
+      (decl c u)
+      (decl p1 (-> u Bool))
+      (decl f1 (-> u u))
+      (stepc lemma
+       (cl (- (p1 (f1 a))) (- (= (f1 a) c)) (- (= c b)) (+ (p1 b)))
+       (ccl (@ lemma)))
+    |}
   ]
 
   let suite =
-    let l =
-      List.map
-        (fun (line,expect,pb,proof) ->
-           (Printf.sprintf "line %d" line) >:: fun _ctx ->
-               test_proof ~expect line pb proof) l
-    in
     "quip" >::: l
 end
 

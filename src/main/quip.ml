@@ -33,7 +33,7 @@ let main ~quiet ~problem proof : 'a =
   );
   let ctx = K.Ctx.create() in
   let problem = Problem_parser.parse_file_exn ctx problem in
-  Log.debug (fun k->k"parsed problem:@ %a" Parsed_pb.pp_debug problem);
+  Log.debug (fun k->k"parsed problem:@ %a" Env.pp_debug problem);
 
   let checker = Quip_check.Check.create ctx problem in
 

@@ -5,7 +5,7 @@ open Common
 
 type t
 
-val create : K.ctx -> Quip_core.Parsed_pb.t -> t
+val create : K.ctx -> Quip_core.Env.t -> t
 
 type stats = {
   n_valid: int;

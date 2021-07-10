@@ -1,114 +1,55 @@
 
 open Common
-type pb = Parsed_pb.t
+type env = Env.t
+type parsed_pb = env
 
 module Log = (val Logs.src_log (Logs.Src.create ~doc:"Problem parser for Quip" "quip.parse-pb"))
 
-module Smtlib = struct
+module Mk_smtlib(Env : Env.S) = struct
   module SA = Smtlib_utils.V_2_6.Ast
   module E = K.Expr
+  let ctx = Env.ctx
 
-  type ('a,'b) tbl =
-    ('a,'b) Hashtbl.t
-    [@polyprinter Fmt.(CCHashtbl.pp ~pp_start:(return "{@[") ~pp_stop:(return "@]})"))]
-  [@@deriving show]
-
-  type 'a vec =
-    'a CCVector.vector
-    [@polyprinter Fmt.(CCVector.pp ~pp_start:(return "[@[") ~pp_stop:(return "@]]"))]
-  [@@deriving show]
-
-  type env = {
-    ctx: K.ctx [@opaque];
-    consts: (string, (K.const [@printer K.Const.pp]) * Builtin.t option) tbl;
-    ty_consts: (string, K.ty_const [@printer K.Const.pp]) tbl;
-    named_terms: (string, K.Expr.t) tbl;
-    builtins: (K.const [@printer K.Const.pp]) Builtin.Tbl.t;
-    assms: (K.Thm.t [@printer K.Thm.pp_quoted]) vec;
-  } [@@deriving show {with_path=false}]
-
-  let create ctx : env =
-    let self = {
-      ctx;
-      consts=Hashtbl.create 32;
-      ty_consts=Hashtbl.create 32;
-      builtins=Builtin.Tbl.create 16;
-      named_terms=Hashtbl.create 32;
-      assms=CCVector.create();
-    } in
-
-    (* pre-populate with some builtins *)
-    begin
-      let bool = E.bool ctx in
-      let type_ = E.type_ ctx in
-      Hashtbl.add self.ty_consts "Bool" (K.Const.bool ctx);
-      let (@->) a b = E.arrow_l ctx a b in
-      let addc s b c =
-        Hashtbl.add self.consts s (c,Some b);
-        Builtin.Tbl.add self.builtins b c;
-      and addtyc s b c =
-        Hashtbl.add self.ty_consts s c; (* TODO: also remember builtin *)
-        Builtin.Tbl.add self.builtins b c;
-      in
-      let mkc ?(tyvars=[]) s b ty =
-        let c =  E.new_const ctx s tyvars ty in
-        addc s b c
-      in
-      let v_alpha = K.Var.make "A" type_ in
-      let alpha = E.var ctx v_alpha in
-      mkc "true" Builtin.True @@ bool;
-      mkc "false" Builtin.False @@ bool;
-      mkc "not" Builtin.Not @@ [bool] @-> bool;
-      mkc "and" Builtin.And @@ [bool;bool] @-> bool;
-      mkc "or" Builtin.Or @@ [bool;bool] @-> bool;
-      mkc "xor" Builtin.Xor @@ [bool;bool] @-> bool;
-      mkc "=>" Builtin.Imply @@ [bool;bool] @-> bool;
-      mkc ~tyvars:[v_alpha] "ite" Builtin.If @@ [bool;alpha;alpha] @-> alpha;
-      addtyc "Bool" Builtin.Bool (K.Const.bool ctx);
-      addc "=" Builtin.Eq (K.Const.eq ctx);
-    end;
-    self
-
-  let conv_ty ~ty_vars (self:env) ty : K.expr =
+  let conv_ty ~ty_vars ty : K.expr =
     Log.debug (fun k->k"(@[conv-ty@ %a@])" SA.pp_ty ty);
     let rec loop ty = match ty with
-      | SA.Ty_bool -> E.bool self.ctx
+      | SA.Ty_bool -> E.bool ctx
       | SA.Ty_real -> errorf "not supported: type Real"
       | SA.Ty_arrow (args, ret) ->
         let args = List.map loop args in
         let ret = loop ret in
-        E.arrow_l self.ctx args ret
+        E.arrow_l ctx args ret
       | SA.Ty_app (s, []) when List.exists (fun v -> v.K.v_name=s) ty_vars ->
         let v = List.find (fun v->v.K.v_name=s) ty_vars in
-        E.var self.ctx v
+        E.var ctx v
       | SA.Ty_app (s, l) ->
-        begin match Hashtbl.find self.ty_consts s with
-          | exception Not_found -> errorf "unknown type constructor '%s'" s
-          | c ->
-            E.const self.ctx c (List.map loop l)
+        begin match Env.find_ty_const_by_name s with
+          | None -> errorf "unknown type constructor '%s'" s
+          | Some c ->
+            E.const ctx c (List.map loop l)
         end
     in
     loop ty
 
-  let find_b_ env b =
-    try Builtin.Tbl.find env.builtins b
-    with Not_found -> errorf "cannot find builtin %a" Builtin.pp b
+  let find_b_ b = match Env.find_builtin b with
+    | Some x -> x
+    | None -> errorf "cannot find builtin %a" Builtin.pp b
 
-  let conv_expr (self:env) e : E.t =
-    let find_const_ c =
-      try Hashtbl.find self.consts c
-      with Not_found -> errorf "unknown constant '%s'" c
-    in
+  let find_const_ c = match Env.find_const_by_name c with
+    | Some x -> x
+    | None -> errorf "unknown constant '%s'" c
+
+  let conv_expr e : E.t =
     let app_str c l =
       let c, _is_b = find_const_ c in
       match _is_b, l with
       | Some b, a::tl when Builtin.is_assoc b ->
         List.fold_left
           (fun acc e ->
-             E.app_l self.ctx (E.const self.ctx c[]) [acc; e])
+             E.app_l ctx (E.const ctx c[]) [acc; e])
           a tl
       | _ ->
-        E.app_l self.ctx (E.const self.ctx c[]) l
+        E.app_l ctx (E.const ctx c[]) l
     in
 
     (* apply an associative operator to a list *)
@@ -117,7 +58,7 @@ module Smtlib = struct
       let rec loop = function
         | [] -> app_str cneutral []
         | [x] -> x
-        | x:: tl -> E.app_l self.ctx c [x; loop tl]
+        | x:: tl -> E.app_l ctx c [x; loop tl]
       in
       loop l
     in
@@ -125,20 +66,20 @@ module Smtlib = struct
     let rec loop (subst:E.t Str_map.t) e =
       let loop' = loop subst in
       match e with
-      | SA.Eq (a,b) -> E.app_eq self.ctx (loop' a) (loop' b)
+      | SA.Eq (a,b) -> E.app_eq ctx (loop' a) (loop' b)
       | SA.True ->
-        E.const self.ctx (fst @@ Hashtbl.find self.consts "true") []
+        E.const ctx (find_b_ Builtin.True) []
       | SA.False ->
-        E.const self.ctx (fst @@ Hashtbl.find self.consts "false") []
+        E.const ctx (find_b_ Builtin.False) []
       | SA.Const c when Str_map.mem c subst ->
         Str_map.find c subst
       | SA.Const c ->
         let c, _ = find_const_ c in
-        E.const self.ctx c []
+        E.const ctx c []
       | SA.App (f, l) ->
         app_str f (List.map loop' l)
       | SA.HO_app (f, a) ->
-        E.app self.ctx (loop' f) (loop' a)
+        E.app ctx (loop' f) (loop' a)
       | SA.Let (bs, body) ->
         let subst2 =
           List.fold_left
@@ -156,15 +97,15 @@ module Smtlib = struct
         let b = loop' b in
         let c = loop' c in
         let ty_b = E.ty_exn b in
-        let c_if = E.const self.ctx (find_b_ self Builtin.If) [ty_b] in
-        E.app_l self.ctx c_if [a; b; c]
+        let c_if = E.const ctx (find_b_ Builtin.If) [ty_b] in
+        E.app_l ctx c_if [a; b; c]
       | SA.Distinct l ->
         (* translate to [/\_{i<j} l_i /= l_j] *)
         let l = List.map loop' l in
         let l2 =
           CCList.diagonal l
           |> List.rev_map (fun (a,b) ->
-              app_str "not" [E.app_eq self.ctx a b])
+              app_str "not" [E.app_eq ctx a b])
         in
         app_assoc "and" "true" l2
 
@@ -176,35 +117,35 @@ module Smtlib = struct
     in
     loop Str_map.empty e
 
-  let add_stmt (self:env) (stmt:SA.statement) : unit =
+  let add_stmt (stmt:SA.statement) : unit =
     Log.debug (fun k->k"(@[process-stmt@ %a@])" SA.pp_stmt stmt);
     let _loc = stmt.SA.loc in (* TODO: convert *)
     begin match stmt.SA.stmt with
 
       | SA.Stmt_decl_sort (name, n) ->
-        let c = E.new_ty_const self.ctx name n in
+        let c = E.new_ty_const ctx name n in
         Log.debug (fun k->k"(@[declare-ty-const@ %a :arity %d@])" K.Const.pp c n);
-        Hashtbl.replace self.ty_consts name c;
+        Env.decl_ty_const name c;
 
       | SA.Stmt_decl { fun_ty_vars; fun_name; fun_args; fun_ret } ->
         let ty_vars =
-          List.map (fun s -> K.Var.make s (K.Expr.type_ self.ctx))
+          List.map (fun s -> K.Var.make s (K.Expr.type_ ctx))
             fun_ty_vars
         in
         let ty =
-          let tr_ty ty = conv_ty ~ty_vars self ty in
-          E.arrow_l self.ctx
+          let tr_ty ty = conv_ty ~ty_vars ty in
+          E.arrow_l ctx
             (List.map tr_ty fun_args) (tr_ty fun_ret)
         in
-        let c = E.new_const self.ctx fun_name ty_vars ty in
+        let c = E.new_const ctx fun_name ty_vars ty in
         Log.debug (fun k->k"(@[declare-const@ %a@])" K.Const.pp c);
-        Hashtbl.replace self.consts fun_name (c, None)
+        Env.decl_const fun_name c
 
       | SA.Stmt_assert t ->
-        let t = conv_expr self t in
-        let th = K.Thm.axiom self.ctx [] t in
+        let t = conv_expr t in
+        let th = K.Thm.axiom ctx [] t in
         Log.info (fun k->k"(@[assert@ %a@])" K.Thm.pp_quoted th);
-        CCVector.push self.assms th;
+        Env.add_assumption th;
 
       | SA.Stmt_fun_def _ | SA.Stmt_fun_rec _
       | SA.Stmt_funs_rec _ ->
@@ -219,13 +160,20 @@ module Smtlib = struct
       | SA.Stmt_pop _ | SA.Stmt_push _
       | SA.Stmt_reset | SA.Stmt_reset_assertions | SA.Stmt_exit -> ()
     end
+end
+
+module Smtlib = struct
+  module SA = Smtlib_utils.V_2_6.Ast
+  module E = K.Expr
+
+  let create ctx : env = Env.make_new_smt2 ~ctx ()
 
   type input =
     [ `File of string
     | `Str of string
     ]
 
-  let parse_ ctx (i:input) : pb =
+  let parse_ ctx (i:input) : parsed_pb =
     let pb =
       match i with
       | `File filename ->
@@ -242,18 +190,10 @@ module Smtlib = struct
     Log.info (fun k->k"parsed %d statements" (List.length pb));
     Log.debug (fun k->k"@[<v2>problem:@ %a@]@." SA.(pp_list pp_stmt) pb);
 
-    let env = create ctx in
-    List.iter (add_stmt env) pb;
-
-    let module PB = struct
-      let ctx = env.ctx
-      let find_const_by_name n = CCHashtbl.get env.consts n
-      let find_ty_const_by_name n = CCHashtbl.get env.ty_consts n
-      let find_builtin b = Builtin.Tbl.get env.builtins b
-      let assumptions () = CCVector.to_seq env.assms
-      let pp_debug out () = pp_env out env
-    end in
-    (module PB)
+    let ((module Env) as env) = create ctx in
+    let module S = Mk_smtlib(Env) in
+    List.iter S.add_stmt pb;
+    env
 
   let parse_file_exn ctx filename =
     Log.debug (fun k->k"parse SMTLIB file '%s'" filename);

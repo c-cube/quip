@@ -100,11 +100,29 @@ module Proof : sig
 
   type composite_step =
     | S_step_c of {
-        name: string; (* name *)
-        res: lit list; (* result of [proof] *)
-        proof: t; (* sub-proof *)
-      }
-    | S_define_t of string * term (* [const := t] *)
+        name: string; (** name *)
+        res: lit list; (** result of [proof] *)
+        proof: t; (** sub-proof *)
+      } (** Proof step with the intermediate result made explicit *)
+
+    | S_define_t of string * term (** Add alias [name := t] at parsing level *)
+
+    | S_declare_ty_const of {
+        name: string;
+        arity: int;
+      } (** Declare new type constructor *)
+
+    | S_declare_const of {
+        name: string;
+        ty: Ty.t;
+      } (** new constant with type *)
+
+    | S_define_const of {
+        name: string;
+        ty: Ty.t;
+        rhs: term;
+      } (** new constant with type + def *)
+
   [@@deriving show]
 
   type bool_c_name =
@@ -168,7 +186,14 @@ module Proof : sig
   (** Unit paramodulation *)
 
   val stepc : name:string -> lit list -> t -> composite_step
+
   val deft : string -> term -> composite_step (** define a (new) atomic term *)
+
+  val decl_const : string -> Ty.t -> composite_step
+
+  val decl_ty_const : string -> int -> composite_step
+
+  val define_const : string -> Ty.t -> term -> composite_step
 
   val is_trivial_refl : t -> bool
   (** is this a proof of [|- t=t]? This can be used to remove

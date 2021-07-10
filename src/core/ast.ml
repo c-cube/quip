@@ -180,6 +180,19 @@ module Proof = struct
         proof: t; (* sub-proof *)
       }
     | S_define_t of string * term (* [const := t] *)
+    | S_declare_ty_const of {
+        name: string;
+        arity: int;
+      }
+    | S_declare_const of {
+        name: string;
+        ty: Ty.t;
+      }
+    | S_define_const of {
+        name: string;
+        ty: Ty.t;
+        rhs: term;
+      }
   [@@deriving show {with_path=false}]
 
     (* TODO: be able to name clauses, to be expanded at parsing.
@@ -208,6 +221,9 @@ module Proof = struct
 
   let stepc ~name res proof : composite_step = S_step_c {proof;name;res}
   let deft c rhs : composite_step = S_define_t (c,rhs)
+  let decl_const name ty : composite_step = S_declare_const {name;ty}
+  let decl_ty_const name arity : composite_step = S_declare_ty_const {name;arity}
+  let define_const name ty rhs : composite_step = S_define_const {name;ty;rhs}
 
   let is_trivial_refl = function
     | Refl _ -> true
@@ -222,8 +238,6 @@ module Proof = struct
   let cc_imply2 h1 h2 t u : t = CC_lemma_imply ([h1; h2], t, u)
   let assertion t = Assert t
   let assertion_c c = Assert_c c
-  let composite_a ?(assms=[]) steps : t =
-    Composite {assumptions=assms; steps}
   let composite_l ?(assms=[]) steps : t =
     Composite {assumptions=assms; steps=Array.of_list steps}
 

@@ -1,7 +1,7 @@
 
 open Common
 module Ast = Quip_core.Ast
-module Parsed_pb = Quip_core.Parsed_pb
+module Env = Quip_core.Env
 
 module Log = (val Logs.src_log (Logs.Src.create ~doc:"Proof checker" "quip.check"))
 
@@ -19,7 +19,7 @@ type t = (module S)
 
 module type ARG = sig
   val ctx : K.ctx
-  val problem : Parsed_pb.t
+  val problem : Env.t
 end
 
 module Make(A : ARG) : S = struct
@@ -893,6 +893,29 @@ module Make(A : ARG) : S = struct
       Hashtbl.add st.checked name c;
 
       Some c
+
+    | P.S_declare_ty_const {name; arity} ->
+      let c = E.new_ty_const ctx name arity in
+      Problem.decl_ty_const name c;
+      None
+
+    | P.S_declare_const {name; ty} ->
+      let ty = conv_ty ty in
+      (* TODO: polymorphic types *)
+      let c = E.new_const ctx name [] ty in
+      Problem.decl_const name c;
+      None
+
+    | P.S_define_const {name; ty; rhs} ->
+      let ty = conv_ty ty in
+      let rhs = conv_term rhs in
+
+      (* [(name:ty) = rhs] as defining equation *)
+      let defe = E.app_eq ctx (E.var_name ctx name ty) rhs in
+      let th, c = K.Thm.new_basic_definition ctx defe in
+      Problem.def_const name c th;
+      Some (Clause.of_thm th)
+
    end
 
   let check_proof p =

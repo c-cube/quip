@@ -256,6 +256,16 @@ module Proof = struct
       let cl = lits_of_sexp cl in
       let sub_pr = p_of_sexp sub_pr in
       P.stepc ~name cl sub_pr
+    | List [{s=Atom "ty_decl";_}; {s=Atom name;loc=_}; {s=Atom n;_}] ->
+      let n = try int_of_string n with _ -> parse_errorf s "expect arity (a number)" in
+      P.decl_ty_const name n
+    | List [{s=Atom "decl";_}; {s=Atom name;loc=_}; ty] ->
+      let ty = ty_of_sexp ty in
+      P.decl_const name ty
+    | List [{s=Atom "def";_}; {s=Atom name;loc=_}; ty; rhs] ->
+      let ty = ty_of_sexp ty in
+      let rhs = t_of_sexp rhs in
+      P.define_const name ty rhs
     | _ -> parse_errorf s "expected a composite step (`deft` or `stepc`)"
 
   let parse_sexp_l_ (l:sexp list) : P.t =

@@ -41,6 +41,7 @@ module Term = struct
     | Ite of 't * 't * 't
     | As of 't * Ty.t (* cast *)
     | Let of (unit Var.t * 't) list * 't
+    | Ref of string
   [@@deriving show, map, fold, iter]
 
   type t = {
@@ -65,6 +66,7 @@ module Term = struct
   let let_ ~loc bs bod : t = mk_ ~loc (Let (bs,bod))
   let fun_ ~loc v bod : t = mk_ ~loc (Fun (v,bod))
   let ite ~loc a b c : t = mk_ ~loc (Ite (a,b,c))
+  let ref ~loc s : t = mk_ ~loc (Ref s)
 
   let rec pp out t = match t.view with
     | Var v -> Var.pp_name out v
@@ -77,6 +79,7 @@ module Term = struct
     | Fun (v,t) ->
       Fmt.fprintf out "(@[lambda %a@ %a@])" (Var.pp Ty.pp) v pp t
     | As (t,ty) -> Fmt.fprintf out "(@[as@ %a@ %a@])" pp t Ty.pp ty
+    | Ref s -> Fmt.fprintf out "(@[@@ %s@])" s
 
   let show = Fmt.to_string pp
 end
@@ -131,11 +134,18 @@ module Proof = struct
     | Refl of term
     | CC_lemma_imply of t list * term * term
     | CC_lemma of clause
+    | Clause_rw of {
+        res: clause;
+        c0: t;
+        using: t list; (** the rewriting equations/atoms *)
+      }
     | Assert of term
     | Assert_c of clause
+    | Rup_res of clause * t list
     | Hres of t * hres_step list
     | Res of { pivot: term; p1: t; p2: t }
     | Res1 of { p1: t; p2: t }
+    | Paramod1 of { rw_with: t; p: t}
     | Subst of Subst.t * t
     | DT_isa_split of ty * term list
     | DT_isa_disj of ty * term * term
@@ -255,52 +265,16 @@ module Proof = struct
   let bool_c name c : t = Bool_c (name, c)
   let nn p : t = Nn p
 
+  let rup_res c hyps : t = Rup_res (c, hyps)
+  let clause_rw ~res ~using c0 : t = Clause_rw {res; using; c0}
+  let paramod1 ~rw_with p : t = Paramod1 {rw_with; p}
+
   let hres_l c l : t = Hres (c,l)
   let res ~pivot p1 p2 : t = Res{pivot;p1;p2}
   let res1 p1 p2 : t = Res1{p1;p2}
   let subst s p : t = Subst(s,p)
 
   let lra_l c : t = LRA c
-
-  (* TODO: expose? *)
-  let iter_lit ~f_t lit = f_t lit.Lit.atom
-
-  (* TODO: expose? *)
-  let iter_p (p:t) ~f_t ~f_step ~f_clause ~f_p : unit =
-    match p with
-    | Sorry -> ()
-    | Sorry_c c -> f_clause c
-    | Named _ -> ()
-    | Refl t -> f_t t
-    | CC_lemma_imply (ps, t, u) -> List.iter f_p ps; f_t t; f_t u
-    | CC_lemma c | Assert_c c -> f_clause c
-    | Assert t -> f_t t
-    | Hres (i, l) ->
-      f_p i;
-      List.iter
-        (function
-          | R1 p -> f_p p
-          | P1 p -> f_p p
-          | R {pivot;p} -> f_p p; f_t pivot
-          | P {lhs;rhs;p} -> f_p p; f_t lhs; f_t rhs)
-        l
-    | Res {pivot;p1;p2} -> f_t pivot; f_p p1; f_p p2
-    | Res1 {p1;p2} -> f_p p1; f_p p2
-    | Subst (s,p) -> List.iter (fun (_v,t) -> f_t t) s; f_p p;
-    | DT_isa_split (_, l) -> List.iter f_t l
-    | DT_isa_disj (_, t, u) -> f_t t; f_t u
-    | DT_cstor_inj (_, _c, ts, us) -> List.iter f_t ts; List.iter f_t us
-    | Bool_true_is_true | Bool_true_neq_false -> ()
-    | Bool_eq (t, u) -> f_t t; f_t u
-    | Bool_c (_, ts) -> List.iter f_t ts
-    | Nn p -> f_p p
-    | Ite_true t | Ite_false t -> f_t t
-    | LRA c -> f_clause c
-    | With (bs,p) -> List.iter (fun (_,t) -> f_t t) bs; f_p p
-    | Composite { assumptions; steps } ->
-      List.iter (fun (_,lit) -> iter_lit ~f_t lit) assumptions;
-      Array.iter f_step steps;
-      ()
 
   let pp_debug = pp
 end

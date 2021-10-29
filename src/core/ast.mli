@@ -36,6 +36,7 @@ module Term : sig
     | Ite of 't * 't * 't
     | As of 't * Ty.t (* cast *)
     | Let of (unit Var.t * 't) list * 't
+    | Ref of string
   [@@deriving show, map, fold, iter]
 
   type t
@@ -45,6 +46,7 @@ module Term : sig
   val loc : t -> Loc.t option
   val map_shallow : (t -> t) -> t -> t
 
+  val ref : loc:Loc.t option -> string -> t
   val var : loc:Loc.t option -> Ty.t option Var.t -> t
   val eq : loc:Loc.t option -> t -> t -> t
   val app_var : loc:Loc.t option -> Ty.t option Var.t -> t list -> t
@@ -147,11 +149,18 @@ module Proof : sig
     | Refl of term
     | CC_lemma_imply of t list * term * term
     | CC_lemma of clause
+    | Clause_rw of {
+        res: clause;
+        c0: t;
+        using: t list; (** the rewriting equations/atoms *)
+      }
     | Assert of term
     | Assert_c of clause
+    | Rup_res of clause * t list
     | Hres of t * hres_step list
     | Res of { pivot: term; p1: t; p2: t }
     | Res1 of { p1: t; p2: t }
+    | Paramod1 of { rw_with: t; p: t}
     | Subst of Subst.t * t
     | DT_isa_split of ty * term list
     | DT_isa_disj of ty * term * term
@@ -214,6 +223,9 @@ module Proof : sig
   val cc_imply2 : t -> t -> term -> term -> t (* tautology [p1, p2 |- t=u] *)
   val cc_imply_l : t list -> term -> term -> t (* tautology [hyps |- t=u] *)
   val composite_l : ?assms:(string * lit) list -> composite_step list -> t
+  val rup_res : clause -> t list -> t
+  val paramod1 : rw_with:t -> t -> t
+  val clause_rw : res:clause -> using:t list -> t -> t
   val sorry : t
   val sorry_c : Clause.t -> t
 

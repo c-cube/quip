@@ -367,6 +367,14 @@ module Make(A : ARG) : S = struct
         let b = conv_term b in
         let c = conv_term c in
         E.app_l ctx (E.const ctx ite [E.ty_exn b]) [a;b;c]
+
+      | T.Ref name ->
+        begin match Hashtbl.find_opt st.named_terms name with
+          | Some u -> u
+          | None ->
+            errorf "reference to unknown term %S" name
+        end
+
       | T.Fun _ ->
         errorf "todo: conv lambda term `%a`" T.pp t
       | T.Let _ ->
@@ -423,7 +431,7 @@ module Make(A : ARG) : S = struct
       c
     with
     | Error e ->
-      Log.err (fun k->k"proof failed with %s" e);
+      Log.err (fun k->k"proof failed with:@ %s" e);
       st.n_invalid <- 1 + st.n_invalid;
       Clause.empty
 
@@ -555,6 +563,21 @@ module Make(A : ARG) : S = struct
               "cc-lemma: expected exactly one positive literal@ in %a"
               Fmt.(Dump.list Lit.pp) (Clause.lits_list c)
           end
+
+      | P.Paramod1 _ ->
+        assert false (* TODO *)
+
+      | P.Clause_rw { res; c0; using } ->
+        let res = conv_clause res in
+        let c0 = check_proof_or_empty_ c0 in
+        let using = List.map check_proof_or_empty_ using in
+
+        Log.debug (fun k->k"(@[clause-rw@ :res %a@ :c0 %a@ :using %a@])"
+                      Clause.pp res Clause.pp c0 (Fmt.Dump.list Clause.pp) using);
+        assert false (* TODO *)
+
+      | P.Rup_res _ ->
+        assert false (* TODO *)
 
       | P.Res {pivot; p1; p2} ->
         let pivot = conv_term pivot in

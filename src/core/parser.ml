@@ -57,6 +57,7 @@ module Proof = struct
       A.Ty.constr name args
     | _ -> parse_errorf s "expected type"
 
+  (** Parse term *)
   let t_of_sexp (sexp:sexp) : T.t =
     let rec loop s : T.t =
       let loc = s.loc in
@@ -67,6 +68,7 @@ module Proof = struct
       | List [{s=Atom "?";_}; {s=Atom name;_}; ty] ->
         let ty = ty_of_sexp ty in
         T.var ~loc (A.Var.make ~ty:(Some ty) name)
+
       | List [{s=Atom "let";_}; {s=List l;_}; bod] ->
         let l = List.map (function
             | {s=List [{s=Atom v;_}; t];_} -> A.Var.make ~ty:() v, loop t
@@ -74,11 +76,17 @@ module Proof = struct
             l
         in
         T.let_ ~loc l @@ loop bod
+
+      | List [{s=Atom ("@" | "ref");_}; {s=Atom name;_}] ->
+        T.ref ~loc name
+
       | List [{s=Atom "ite";_}; a; b; c] ->
         T.ite ~loc (loop a) (loop b) (loop c)
+
       | List [{s=Atom "lambda";_}; {s=List[{s=Atom v; _}; ty];_}; bod] ->
         let v = A.Var.make ~ty:(ty_of_sexp ty) v in
         T.fun_ ~loc v (loop bod)
+
       | List ({s=Atom f;_} :: args) ->
         let args = List.map loop args in
         T.app_name ~loc f args
@@ -95,6 +103,7 @@ module Proof = struct
       | _ -> parse_errorf s "expected term"
     in loop sexp
 
+  (** Parse substitution *)
   let s_of_sexp (sexp:sexp) : A.Subst.t =
     let rec of_l = function
       | [] -> []
@@ -121,6 +130,7 @@ module Proof = struct
     | List ({s=Atom "cl";_} :: lits) -> List.map lit_of_sexp lits
     | _ -> parse_errorf s "expected a clause `(cl t1 t2 … tn)`"
 
+  (** Parse clause *)
   let cl_of_sexp (s:sexp) : A.clause =
     match s.s with
     | List [{s=Atom ("@"|"ref");_}; {s=Atom name;_}] ->
@@ -137,6 +147,7 @@ module Proof = struct
       name, lit
     | _ -> parse_errorf s "expected an assumption `(<name> <lit>)`"
 
+  (** Parse proof *)
   let rec p_of_sexp (s:sexp) : P.t =
     match s.s with
     | List [{s=Atom "steps";_}; {s=List asms;_}; {s=List steps;_}] ->
@@ -187,6 +198,22 @@ module Proof = struct
         | _ -> parse_errorf s_name "unknown bool-c rule: '%s'" name
       ) in
       P.bool_c name ts
+
+    | List [{s=Atom "clause-rw";_}; cl; p; {s=List using;_}] ->
+      let cl = cl_of_sexp cl in
+      let p = p_of_sexp p in
+      let using = List.map p_of_sexp using in
+      P.clause_rw ~res:cl p ~using
+
+    | List [{s=Atom "rup";_}; cl; {s=List using;_}] ->
+      let cl = cl_of_sexp cl in
+      let using = List.map p_of_sexp using in
+      P.rup_res cl using
+
+    | List [{s=Atom "p1";_}; rw_with; p] ->
+      let rw_with = p_of_sexp rw_with in
+      let p = p_of_sexp p in
+      P.paramod1 ~rw_with p
 
     | Atom "t-ne-f" -> P.true_neq_false
     | Atom "t-is-t" -> P.true_is_true
@@ -247,6 +274,7 @@ module Proof = struct
 
     | _ -> parse_errorf s "expected a proof"
 
+  (** Parse a composite step *)
   and step_of_sexp (s:sexp) : P.composite_step =
     match s.s with
     | List [{s=Atom "deft";_}; {s=Atom name;loc=_}; t] ->

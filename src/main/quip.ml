@@ -79,11 +79,9 @@ let () =
       try main ~quiet:!quiet ~problem:!problem proof
       with
       | Error msg ->
-        Log.err (fun k->k "error: %s" msg);
-        Fmt.eprintf "@{<Red>Error@}: %s" msg; exit 3
+        Fmt.eprintf "@{<Red>Error@}: %s@." msg; exit 3
       | e ->
         let msg = Printexc.to_string e in
-        Log.err (fun k->k "error: %s" msg);
-        Fmt.eprintf "@{<Red>Error@}: %s" msg; exit 3
+        Fmt.eprintf "@{<Red>Error@}: %s@." msg; exit 3
     end
   | _ -> Fmt.eprintf "expected [opt]* <proof>@."; exit 2

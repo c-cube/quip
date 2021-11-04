@@ -2,6 +2,7 @@
 open Common
 module Ast = Quip_core.Ast
 module Env = Quip_core.Env
+module CC = Trustee_core.Congruence_closure
 
 module Log = (val Logs.src_log (Logs.Src.create ~doc:"Proof checker" "quip.check"))
 
@@ -60,6 +61,7 @@ module Make(A : ARG) : S = struct
     val sign : t -> bool
     val atom : t -> E.t
     val to_expr : t -> E.t
+    val as_eqn : t -> (E.t * E.t) option
     val make : bool -> E.t -> t
   end = struct
     type t = {
@@ -83,6 +85,10 @@ module Make(A : ARG) : S = struct
     let to_expr (self:t) : K.expr =
       if self.sign then self.expr
       else E.app ctx Cst.not_ self.expr
+
+    let as_eqn self : _ option =
+      if self.sign then E.unfold_eq self.expr
+      else None
   end
 
   (** {2 Direct form clause} *)
@@ -293,14 +299,18 @@ module Make(A : ARG) : S = struct
     mutable n_valid: int;
     mutable n_invalid: int;
     mutable n_steps: int;
+    dummy_e: K.expr;
   }
 
-  let st : st = {
-    checked = Hashtbl.create 32;
-    named_terms = Hashtbl.create 16;
-    named_clauses = Hashtbl.create 16;
-    n_valid=0; n_invalid=0; n_steps=0;
-  }
+  let st : st =
+    let _c = K.Expr.new_ty_const ctx " <dummy>" 0 in
+    {
+      checked = Hashtbl.create 32;
+      named_terms = Hashtbl.create 16;
+      named_clauses = Hashtbl.create 16;
+      n_valid=0; n_invalid=0; n_steps=0;
+      dummy_e = K.Expr.const ctx _c [];
+    }
 
   let rec conv_ty (ty: Ast.ty) : K.ty =
     match ty with
@@ -320,7 +330,7 @@ module Make(A : ARG) : S = struct
 
   let rec conv_term (t: Ast.term) : K.expr =
     let module T = Ast.Term in
-    Log.debug (fun k->k"conv-t %a" T.pp t);
+    (* Log.debug (fun k->k"(@[conv-t %a@])" T.pp t); *)
     begin match T.view t with
       | T.App (f, l) ->
         let l = List.map conv_term l in
@@ -357,7 +367,7 @@ module Make(A : ARG) : S = struct
                     let ty = conv_ty ty in
                     E.var_name ctx v.name ty
                   | None ->
-                    errorf"cannot convert unknown variable@ `%a`" T.pp t
+                    errorf"cannot convert unknown identifier@ `%a`" T.pp t
                 end
             end
         end
@@ -523,7 +533,6 @@ module Make(A : ARG) : S = struct
            - then do resolution with [ps], which might be Horn clauses,
               not just equalities *)
 
-        let module CC = Trustee_core.Congruence_closure in
         begin match CC.prove_cc_eqn ctx hyps t u with
           | None ->
             Log.err (fun k->k"hyps: %a;@ concl: `@[%a@ = %a@]`"
@@ -564,8 +573,49 @@ module Make(A : ARG) : S = struct
               Fmt.(Dump.list Lit.pp) (Clause.lits_list c)
           end
 
-      | P.Paramod1 _ ->
-        assert false (* TODO *)
+      | P.Paramod1 { rw_with; p=passive } ->
+        let rw_with = check_proof_or_empty_ rw_with in
+        let passive = check_proof_or_empty_ passive in
+        Log.debug (fun k->k"(@[paramod1@ :rw-with %a@ :p %a@])"
+                      Clause.pp rw_with Clause.pp passive);
+
+        (* decompose [rw_with] into an equation [t=u] *)
+        let t, u =
+          match Clause.lits_list rw_with |> List.map Lit.as_eqn with
+          | [Some (a,b)] -> a,b
+          | _ ->
+            errorf "expected (@[rw-with@ %a@])@ to be an equation" Clause.pp rw_with
+        in
+
+        let candidates =
+          Clause.lits passive
+          |> Iter.filter_map
+            (fun lit ->
+               let sign = Lit.sign lit in
+               let a = Lit.atom lit in
+               if E.equal a t then Some (a, sign, u)
+               else if E.equal a u then Some (a, sign, t)
+               else None)
+          |> Iter.to_rev_list
+        in
+
+        begin match candidates with
+          | [(a, _sign, into)] ->
+            Log.debug (fun k->k"(@[paramodulation@ :of %a@ :with %a@ :pivot %a@])"
+                          Clause.pp passive Clause.pp rw_with E.pp a);
+
+            (* TODO: do the paramodulation *)
+            let res = bool_param_on_ ~lhs:a ~rhs:into ~rw_with passive in
+            true, res
+
+          | (a1,_,_) :: (a2,_,_) :: _ ->
+            errorf "ambiguous paramodulation %a by %a:@ \
+                    possible candidates include %a@ and %a"
+              P.pp p Clause.pp rw_with E.pp a1 E.pp a2
+
+          | [] ->
+            errorf "no candidate found for paramodulation %a" P.pp p
+        end
 
       | P.Clause_rw { res; c0; using } ->
         let res = conv_clause res in
@@ -574,10 +624,117 @@ module Make(A : ARG) : S = struct
 
         Log.debug (fun k->k"(@[clause-rw@ :res %a@ :c0 %a@ :using %a@])"
                       Clause.pp res Clause.pp c0 (Fmt.Dump.list Clause.pp) using);
-        assert false (* TODO *)
 
-      | P.Rup_res _ ->
-        assert false (* TODO *)
+        if using = [] then (
+          if not (Clause.equal c0 res) then (
+            errorf "clause rw failed (empty :using but distinct clauses)@ \
+                   for %a" P.pp p
+          );
+
+          true, res
+        ) else (
+
+          let hyps_using =
+            using
+            |> Iter.of_list
+            |> Iter.filter_map
+              (fun c ->
+                 match Clause.uniq_pos_lit c with
+                 | Some lit -> Some (K.Thm.assume ctx (Lit.atom lit))
+                 | None -> None)
+          and hyps_neg_res =
+            res
+            |> Clause.lits
+            |> Iter.map Lit.neg
+            |> Iter.map (fun lit -> K.Thm.assume ctx (Lit.to_expr lit))
+          in
+
+          (* hypotheses common to each subproof *)
+          let common_hyps =
+            Iter.append hyps_using hyps_neg_res
+            |> Iter.to_rev_list
+          in
+
+          (* check if [false] can be proven from [lit] and
+             the common hypotheses ("using" side conditions,
+             and the negated conclusion of [p]) *)
+          let false_provable_with lit : bool =
+            let hyp_lit =
+              K.Thm.assume ctx (Lit.to_expr lit)
+            in
+
+            let hyps = hyp_lit :: common_hyps in
+            let false_ = E.const ctx (get_builtin_ B.False) [] in
+
+            begin match CC.prove_cc_bool ctx hyps false_ with
+              | Some _ -> true
+              | None ->
+                Log.err
+                  (fun k->k"(@[clause-rw: cannot prove@ :lit %a@ :from-hyps %a@])"
+                      Lit.pp lit Fmt.(Dump.list K.Thm.pp) common_hyps);
+                false
+            end
+          in
+
+          let bad =
+            Clause.lits c0
+            |> Iter.map Lit.neg
+            |> Iter.find_pred (fun l -> not (false_provable_with l))
+          in
+          begin match bad with
+            | None ->
+              (* valid *)
+              Log.debug (fun k->k"valid: %a" P.pp p);
+              true, res
+
+            | Some bad ->
+              Log.err (fun k->k"cannot validate %a@ because of literal %a"
+                          P.pp p Lit.pp bad);
+              false, res
+          end
+        )
+
+      | P.Rup_res (c, hyps) ->
+        Log.debug (fun k->k"check step %a" P.pp p);
+
+        (* instantiate RUP checker *)
+        let module D = Rup_check.Make(struct
+            include K.Expr
+            let dummy = st.dummy_e
+          end) in
+
+        let c = conv_clause c in
+        let hyps = List.map check_proof_or_empty_ hyps in
+
+        let cstore = D.Clause.create() in
+        let checker = D.Checker.create cstore in
+
+        let lit_to_atom (lit:Lit.t) =
+          let t = Lit.atom lit in
+          let sign = Lit.sign lit in
+          D.Atom.make ~sign t
+        in
+
+        List.iter
+          (fun hyp ->
+             let c =
+               Clause.lits hyp
+               |> Iter.map lit_to_atom
+               |> Iter.to_rev_list
+             in
+             D.Checker.add_clause_l checker c)
+          hyps;
+
+        (* the goal clause [c] *)
+        let goal =
+          Clause.lits c
+          |> Iter.map lit_to_atom
+          |> D.Clause.of_iter cstore
+        in
+
+        let ok = D.Checker.is_valid_drup checker goal in
+        Log.debug (fun k->k"RUP check@ for %a:@ %B" Clause.pp c ok);
+        ok, c
 
       | P.Res {pivot; p1; p2} ->
         let pivot = conv_term pivot in
@@ -804,7 +961,7 @@ module Make(A : ARG) : S = struct
 
   (* do bool paramodulation between [c1] and [c2],
        where [c2] must contain [lhs = rhs] and [c1] must contain [lhs] *)
-  and bool_param_on_ ~lhs ~rhs c1 c2 : Clause.t =
+  and bool_param_on_ ~lhs ~rhs c1 ~rw_with:c2 : Clause.t =
     Log.debug (fun k->k "(@[bool-param@ :c1 %a@ :c2 %a@ :lhs `%a`@ :rhs `%a`@])"
                   Clause.pp c1 Clause.pp c2 E.pp lhs E.pp rhs);
     (* find if [c2] contains [lhs=rhs] or [rhs=lhs] *)
@@ -862,7 +1019,7 @@ module Make(A : ARG) : S = struct
         let lhs = conv_term lhs in
         let rhs = conv_term rhs in
         let c2 = check_proof_or_empty_ p in
-        bool_param_on_ ~lhs ~rhs c1 c2
+        bool_param_on_ ~lhs ~rhs c1 ~rw_with:c2
 
       | P.P1 p ->
         let c2 = check_proof_or_empty_ p in
@@ -871,7 +1028,7 @@ module Make(A : ARG) : S = struct
         | Some lit ->
           assert (Lit.sign lit);
           begin match E.unfold_eq (Lit.atom lit) with
-            | Some (lhs, rhs) -> bool_param_on_ ~lhs ~rhs c1 c2
+            | Some (lhs, rhs) -> bool_param_on_ ~lhs ~rhs c1 ~rw_with:c2
             | None -> fail()
           end
         | None -> fail()

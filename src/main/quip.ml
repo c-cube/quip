@@ -54,6 +54,7 @@ let main ~quiet ~problem proof : 'a =
   exit (if proof_valid then 0 else 1)
 
 let () =
+  Printexc.record_backtrace true;
   let files = ref [] in
   let color = ref true in
   let quiet = ref false in
@@ -81,7 +82,8 @@ let () =
       | Error msg ->
         Fmt.eprintf "@{<Red>Error@}: %s@." msg; exit 3
       | e ->
+        let bt = Printexc.get_backtrace() in
         let msg = Printexc.to_string e in
-        Fmt.eprintf "@{<Red>Error@}: %s@." msg; exit 3
+        Fmt.eprintf "@{<Red>Error@}: %s@.%s@." msg bt; exit 3
     end
   | _ -> Fmt.eprintf "expected [opt]* <proof>@."; exit 2

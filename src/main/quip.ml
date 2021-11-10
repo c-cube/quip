@@ -23,10 +23,20 @@ let setup_log lvl : unit =
   Logs.set_reporter (Logger.as_reporter quip_logger);
   Logs.set_level ~all:true (Some lvl)
 
+let with_file_in (file:string) f =
+  if Filename.extension file = ".gz" then (
+    let p = Unix.open_process_in
+        (Printf.sprintf "gzip --keep -d -c \"%s\"" (String.escaped file))
+    in
+    CCFun.finally1
+      ~h:(fun () -> Unix.close_process_in p)
+      f p
+  ) else CCIO.with_in file f
+
 (* check proof for problem, then exits *)
 let main ~quiet ~problem proof : 'a =
   Log.info (fun k->k"process proof '%s' with problem %a" proof (Fmt.opt Fmt.string_quoted) problem);
-  let proof = CCIO.with_in proof (Parser.Proof.parse_chan ~filename:proof) in
+  let proof = with_file_in proof (Parser.Proof.parse_chan ~filename:proof) in
   if not quiet then (
     Log.info (fun k->k"parsed proof");
     Log.debug (fun k->k"parsed proof:@ %a" Ast.Proof.pp proof);

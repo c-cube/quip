@@ -57,6 +57,7 @@ module Make(A : ARG) : S = struct
   (** {2 Literal} *)
   module Lit : sig
     type t [@@deriving show, eq, ord]
+    val pp_depth : ?max_depth:int -> t Fmt.printer
     val neg : t -> t
     val sign : t -> bool
     val atom : t -> E.t
@@ -69,9 +70,13 @@ module Make(A : ARG) : S = struct
       expr: K.Expr.t;
     } [@@deriving eq, ord]
 
-    let pp out (self:t) =
+    let pp_depth ?max_depth out (self:t) =
+      let pp_t = match max_depth with
+        | None -> K.Expr.pp
+        | Some max_depth -> K.Expr.pp_depth ~max_depth in
       let s = if self.sign then "+" else "-" in
-      Fmt.fprintf out "(@[%s@ %a@])" s K.Expr.pp self.expr
+      Fmt.fprintf out "(@[%s@ %a@])" s pp_t self.expr
+    let pp = pp_depth ?max_depth:None
     let show = Fmt.to_string pp
 
     let[@inline] sign self = self.sign
@@ -94,6 +99,8 @@ module Make(A : ARG) : S = struct
   (** {2 Direct form clause} *)
   module Clause : sig
     type t [@@deriving show, eq]
+    val pp_depth: max_depth:int -> t Fmt.printer
+
     val empty : t
     val of_list : Lit.t list -> t
     val of_iter : Lit.t Iter.t -> t
@@ -143,7 +150,12 @@ module Make(A : ARG) : S = struct
       ESet.iter (fun t -> k (Lit.make true t)) self.pos
 
     let pp out self =
-      Fmt.fprintf out "(@[cl@ %a@])" (Fmt.iter Lit.pp) (lits self)
+      Fmt.fprintf out "(@[<hv>cl@ %a@])"
+        Fmt.(iter ~sep:(return "@ ") Lit.pp) (lits self)
+
+    let pp_depth ~max_depth out self =
+      Fmt.fprintf out "(@[<hv>cl@ %a@])"
+        Fmt.(iter ~sep:(return "@ ") @@ Lit.pp_depth ~max_depth) (lits self)
 
     let show = Fmt.to_string pp
 
@@ -263,11 +275,24 @@ module Make(A : ARG) : S = struct
     | E.E_app (f, u) when E.equal f Cst.not_ -> Some u
     | _ -> None
 
+
   (* find builtin [b] *)
   let get_builtin_ b =
     match Problem.find_builtin b with
     | Some c -> c
     | None -> errorf "cannot find builtin %a" B.pp b
+
+  (* takes [|- a] and [|- ¬a] and returns [|- false] *)
+  let prove_false =
+    let v = K.Var.make "A" (E.bool ctx) in
+    let e_v = E.var ctx v in
+    let false_ = E.const ctx (get_builtin_ B.False) [] in
+    let th0 = Thm.axiom ctx [e_v; E.app ctx Cst.not_ e_v] false_ in
+    fun _ctx (th1: Thm.t) (th2: Thm.t) : Thm.t ->
+      let e = Thm.concl th1 in
+      let subst = K.Subst.of_list [v, e] in
+      let th0' = Thm.subst ~recursive:false ctx th0 subst in
+      Thm.cut ctx th1 @@ Thm.cut ctx th2 th0'
 
   (* unfold builtin application. *)
   let unfold_builtin b e : _ list option =
@@ -433,6 +458,7 @@ module Make(A : ARG) : S = struct
     st.n_steps <- 1 + st.n_steps;
     try
       let ok, c = check_proof_rec_exn p in
+      Log.debug (fun k->k"(@[check-proof.res@ :ok %b@ :for %a@])" ok P.pp p);
       if ok then (
         st.n_valid <- 1 + st.n_valid;
       ) else (
@@ -640,13 +666,13 @@ module Make(A : ARG) : S = struct
             |> Iter.filter_map
               (fun c ->
                  match Clause.uniq_pos_lit c with
-                 | Some lit -> Some (K.Thm.assume ctx (Lit.atom lit))
+                 | Some lit -> Some (K.Thm.axiom ctx [] (Lit.atom lit))
                  | None -> None)
           and hyps_neg_res =
             res
             |> Clause.lits
             |> Iter.map Lit.neg
-            |> Iter.map (fun lit -> K.Thm.assume ctx (Lit.to_expr lit))
+            |> Iter.map (fun lit -> K.Thm.axiom ctx [] (Lit.to_expr lit))
           in
 
           (* hypotheses common to each subproof *)
@@ -659,26 +685,31 @@ module Make(A : ARG) : S = struct
              the common hypotheses ("using" side conditions,
              and the negated conclusion of [p]) *)
           let false_provable_with lit : bool =
-            let hyp_lit =
-              K.Thm.assume ctx (Lit.to_expr lit)
-            in
+            let hyp_lit = K.Thm.axiom ctx [] (Lit.to_expr lit) in
 
             let hyps = hyp_lit :: common_hyps in
-            let false_ = E.const ctx (get_builtin_ B.False) [] in
 
-            begin match CC.prove_cc_bool ctx hyps false_ with
-              | Some _ -> true
+            begin match
+                CC.prove_cc_false ctx hyps ~prove_false ~not_e:Cst.not_
+              with
+              | Some th ->
+                Log.debug (fun k->k"prove-false yields@ `%a`" Thm.pp th);
+                true
               | None ->
                 Log.err
                   (fun k->k"(@[clause-rw: cannot prove@ :lit %a@ :from-hyps %a@])"
-                      Lit.pp lit Fmt.(Dump.list K.Thm.pp) common_hyps);
+                      (Lit.pp_depth ~max_depth:4) lit
+                      Fmt.(Dump.list @@ within "`" "`" @@
+                           K.Thm.pp_depth ~max_depth:4) common_hyps);
+                Log.debug (fun k->k"(@[all-hyps: %a@])"
+                              (Fmt.Dump.list @@ K.Thm.pp_depth ~max_depth:4)
+                              hyps);
                 false
             end
           in
 
           let bad =
             Clause.lits c0
-            |> Iter.map Lit.neg
             |> Iter.find_pred (fun l -> not (false_provable_with l))
           in
           begin match bad with
@@ -689,7 +720,7 @@ module Make(A : ARG) : S = struct
 
             | Some bad ->
               Log.err (fun k->k"cannot validate %a@ because of literal %a"
-                          P.pp p Lit.pp bad);
+                          P.pp p (Lit.pp_depth ~max_depth:5) bad);
               false, res
           end
         )
@@ -733,7 +764,8 @@ module Make(A : ARG) : S = struct
         in
 
         let ok = D.Checker.is_valid_drup checker goal in
-        Log.debug (fun k->k"RUP check@ for %a:@ %B" Clause.pp c ok);
+        Log.debug (fun k->k"(@[RUP-check.res@ :res %B@ :for %a@ :hyps %a@])"
+                      ok Clause.pp c (Fmt.Dump.list Clause.pp) hyps);
         ok, c
 
       | P.Res {pivot; p1; p2} ->

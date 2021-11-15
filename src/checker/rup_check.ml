@@ -2,6 +2,8 @@
 open Common
 module Vec = CCVector
 
+module Log = (val Logs.src_log (Logs.Src.create "quip.rup"))
+
 module type TERM = sig
   type t
   val dummy : t

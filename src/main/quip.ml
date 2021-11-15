@@ -75,6 +75,7 @@ let () =
   let opts = [
     "--info", Arg.Unit (fun() -> log_level := Logs.Info), " set log level to info";
     "--debug", Arg.Unit (fun() -> log_level := Logs.Debug), " set log level to debug";
+    "-d", Arg.Unit (fun() -> log_level := Logs.Debug), " set log level to debug";
     "--problem", Arg.String (fun s->problem := Some s), " parse context from this problem file";
     "-nc", Arg.Clear color, " disable color";
     "-q", Arg.Set quiet, " quiet mode";

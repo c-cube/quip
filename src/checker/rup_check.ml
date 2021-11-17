@@ -353,6 +353,7 @@ module Make(T:TERM)
       | Is_sat -> Keep
 
     let propagate_atom_ self (a:atom) : unit =
+      ensure_atom_ self a;
       let v = Atom.Tbl.find self.watches a in
       let i = ref 0 in
       while !i < Vec.length v do

@@ -13,4 +13,6 @@ type stats = {
   n_steps: int;
 } [@@deriving show]
 
-val check_proof : t -> Quip_core.Ast.Proof.t -> bool * stats
+type bad = string
+
+val check_proof : t -> Quip_core.Ast.Proof.t -> bool * bad list * stats

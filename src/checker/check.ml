@@ -6,6 +6,7 @@ module CC = Trustee_core.Congruence_closure
 
 module Log = (val Logs.src_log (Logs.Src.create ~doc:"Proof checker" "quip.check"))
 
+type bad = string
 type stats = {
   n_valid: int;
   n_invalid: int;
@@ -13,7 +14,7 @@ type stats = {
 } [@@deriving show {with_path=false}]
 
 module type S = sig
-  val check_proof : Ast.Proof.t -> bool * stats
+  val check_proof : Ast.Proof.t -> bool * bad list * stats
 end
 
 type t = (module S)
@@ -321,6 +322,7 @@ module Make(A : ARG) : S = struct
     checked: (string, Clause.t) Hashtbl.t;
     named_terms: (string, K.expr) Hashtbl.t;
     named_clauses: (string, Clause.t) Hashtbl.t;
+    mutable bad: bad list;
     mutable n_valid: int;
     mutable n_invalid: int;
     mutable n_steps: int;
@@ -333,6 +335,7 @@ module Make(A : ARG) : S = struct
       checked = Hashtbl.create 32;
       named_terms = Hashtbl.create 16;
       named_clauses = Hashtbl.create 16;
+      bad=[];
       n_valid=0; n_invalid=0; n_steps=0;
       dummy_e = K.Expr.const ctx _c [];
     }
@@ -459,7 +462,7 @@ module Make(A : ARG) : S = struct
 
   (* check [p], returns its resulting clause.
      In case of error this returns the empty clause. *)
-  let rec check_proof_or_empty_ p : Clause.t =
+  let rec check_subproof (p:P.t) : Clause.t * bool =
     st.n_steps <- 1 + st.n_steps;
     try
       let ok, c = check_proof_rec_exn p in
@@ -469,12 +472,15 @@ module Make(A : ARG) : S = struct
       ) else (
         st.n_invalid <- 1 + st.n_invalid;
       );
-      c
+      c, ok
     with
     | Error e ->
       Log.err (fun k->k"proof failed with:@ %s" e);
       st.n_invalid <- 1 + st.n_invalid;
-      Clause.empty
+      Clause.empty, false
+
+  and check_proof_or_empty_ p =
+    fst @@ check_subproof p
 
   (* check proof [p], returns the clause it returns *)
   and check_proof_rec_exn (p: Ast.Proof.t) : bool * Clause.t =
@@ -1073,7 +1079,8 @@ module Make(A : ARG) : S = struct
 
       Log.info (fun k->k"check step '%s'" name);
 
-      let c = check_proof_or_empty_ proof in
+      let c, ok = check_subproof proof in
+      if not ok then st.bad <- name :: st.bad;
       Log.debug (fun k->k"step '%s'@ yields %a" name Clause.pp c);
 
       (* named clause goes out of scope *)
@@ -1126,13 +1133,14 @@ module Make(A : ARG) : S = struct
     let _c = check_proof_or_empty_ p in
     (* TODO: should it return the empty clause? *)
     let ok = st.n_invalid=0 in
-    ok, {n_invalid=st.n_invalid; n_valid=st.n_valid; n_steps=st.n_steps}
+    let bad = List.sort String.compare st.bad in
+    ok, bad, {n_invalid=st.n_invalid; n_valid=st.n_valid; n_steps=st.n_steps}
 end
 
 let create ctx pb : t =
   let module M = Make(struct let ctx=ctx let problem=pb end) in
   (module M)
 
-let check_proof (self: t) (p: Ast.Proof.t) : bool * stats =
+let check_proof (self: t) (p: Ast.Proof.t) : bool * _ * stats =
   let (module Self) = self in
   Self.check_proof p

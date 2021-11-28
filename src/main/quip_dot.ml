@@ -98,7 +98,7 @@ end = struct
 
     (* define *)
     add_linef state
-      {|@[%s [label="%s", shape="box", style="filled", color="lavenderblush1"];@]|}
+      {|@[%s [label="%s", shape="box", style="filled", fillcolor="lavenderblush1"];@]|}
       name label;
 
     (* add edges *)
@@ -124,7 +124,7 @@ end = struct
         in
 
         add_linef state
-          {|@[%s [label="%s",shape="box",color="%s",style="filled"]@]|}
+          {|@[%s [label="%s",shape="box",fillcolor="%s",style="filled"]@]|}
           name label (if res=[||] then "red" else "cyan");
         let p = pp_proof_itself state proof in
         add_linef state {|@[%s -> %s [label="proof(%s)"]@]|} name p name;

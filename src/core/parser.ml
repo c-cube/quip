@@ -64,6 +64,7 @@ module Proof = struct
       match s.s with
       | Atom name -> T.const ~loc name
       | List [{s=Atom "=";_}; a; b] -> T.eq ~loc (loop a) (loop b)
+      | List [{s=Atom "not";_}; a] -> T.not ~loc (loop a)
 
       | List [{s=Atom "?";_}; {s=Atom name;_}; ty] ->
         let ty = ty_of_sexp ty in

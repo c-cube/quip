@@ -1,0 +1,5 @@
+
+(library
+  (name quip_util)
+  (public_name quip.util)
+  (libraries quip.core containers logs))

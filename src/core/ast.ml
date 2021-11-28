@@ -39,6 +39,7 @@ module Term = struct
     | Fun of 'ty Var.t * 't
     | Var of 'ty option Var.t
     | Ite of 't * 't * 't
+    | Not of 't
     | As of 't * Ty.t (* cast *)
     | Let of (unit Var.t * 't) list * 't
     | Ref of string
@@ -62,6 +63,9 @@ module Term = struct
     if l=[] then v else mk_ ~loc (App (v, l))
   let app_name ~loc v l : t = app_var ~loc (Var.make ~ty:None v) l
   let const ~loc c = app_name ~loc c []
+  let not ~loc u = match u.view with
+    | Not v -> v
+    | _ -> mk_ ~loc (Not u)
   let eq ~loc a b : t = app_name ~loc "=" [a;b]
   let let_ ~loc bs bod : t = mk_ ~loc (Let (bs,bod))
   let fun_ ~loc v bod : t = mk_ ~loc (Fun (v,bod))
@@ -79,6 +83,7 @@ module Term = struct
     | App (f, l) ->
       Fmt.fprintf out "(@[%a@ %a@])" pp f (pp_l pp) l
     | Ite (a,b,c) -> Fmt.fprintf out "(@[ite@ %a@ %a@ %a@])" pp a pp b pp c
+    | Not u -> Fmt.fprintf out "(@[not@ %a@])" pp u
     | Let (bs, bod) ->
       let ppb out (v,t) = Fmt.fprintf out "(@[%a@ %a@])" Var.pp_name v pp t in
       Fmt.fprintf out "(@[let@ (@[%a@]@ %a@])" (pp_l ppb) bs pp bod
@@ -99,35 +104,14 @@ module Subst = struct
   [@@deriving show]
 end
 
-module Lit = struct
-  type t = {
-    sign: bool [@default true];
-    atom: term [@main];
-  } [@@deriving make]
-
-  let not l = {l with sign=not l.sign}
-
-  let pp out l =
-    let s = if l.sign then "+" else "-" in
-    Fmt.fprintf out "(@[%s %a@])" s Term.pp l.atom
-  let show = Fmt.to_string pp
-
-  let a t = make ~sign:true t
-  let na t = make ~sign:false t
-
-  let map_term f lit = {lit with atom=f lit.atom}
-end
-
-type lit = Lit.t [@@deriving show]
-
 module Clause = struct
   type t =
-    | Clause of lit list
+    | Clause of term list
     | Clause_ref of Name.t
   let pp out (c:t) =
     match c with
     | Clause lits ->
-      Fmt.fprintf out "(@[cl@ %a@])" Fmt.(list ~sep:(return "@ ") Lit.pp) lits
+      Fmt.fprintf out "(@[cl@ %a@])" Fmt.(list ~sep:(return "@ ") Term.pp) lits
     | Clause_ref n -> Fmt.fprintf out "(@[@@ %s@])" n
   let show = Fmt.to_string pp
 end
@@ -160,7 +144,7 @@ module Proof = struct
   type 'proof composite_step =
     | S_step_c of {
         name: string; (* name *)
-        res: lit list; (* result of [proof] *)
+        res: term list; (* result of [proof] *)
         proof: 'proof; (* sub-proof *)
       }
     | S_define_t of string * term (* [const := t] *)
@@ -206,14 +190,13 @@ module Proof = struct
     | Bool_true_neq_false
     | Bool_eq of 'term * 'term (* equal by pure boolean reasoning *)
     | Bool_c of bool_c_name * 'term list (* boolean tautology *)
-    | Nn of 'proof
     | Ite_true of 'term (* given [if a b c] returns [a=T |- if a b c=b] *)
     | Ite_false of 'term
     | LRA of 'clause
     | With of with_bindings * 'proof
     | Composite of {
         (* some named (atomic) assumptions *)
-        assumptions: (string * lit) list;
+        assumptions: (string * 'term) list;
         steps: 'proof composite_step array; (* last step is the proof *)
       }
   [@@deriving show {with_path=false}, map, iter]
@@ -264,7 +247,6 @@ module Proof = struct
   let true_neq_false : t = mk @@ Bool_true_neq_false
   let bool_eq a b : t = mk @@ Bool_eq (a,b)
   let bool_c name c : t = mk @@ Bool_c (name, c)
-  let nn p : t = mk @@ Nn p
 
   let rup_res c hyps : t = mk @@ Rup_res (c, hyps)
   let clause_rw ~res ~using c0 : t = mk @@ Clause_rw {res; using; c0}

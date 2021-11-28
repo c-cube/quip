@@ -6,13 +6,12 @@ module Dot : sig
 end = struct
   open Ast.Proof
   module T = Ast.Term
-  type lit = Ast.Lit.t
 
   type name = string (** node name *)
 
   type state = {
     terms: (string, Ast.Term.t) Hashtbl.t;
-    clauses: (string, lit array) Hashtbl.t;
+    clauses: (string, T.t array) Hashtbl.t;
     printed: (string, unit) Hashtbl.t;
     out: string CCVector.vector;
     mutable n: int;
@@ -38,10 +37,7 @@ end = struct
     in
     T.rw ~rule t
 
-  let norm_lit st lit : lit =
-    Ast.Lit.map_term (norm_term st) lit
-
-  let norm_clause st (c:Ast.Clause.t) : lit array =
+  let norm_clause st (c:Ast.Clause.t) : T.t array =
     match c with
     | Ast.Clause.Clause_ref n ->
       (try Hashtbl.find st.clauses n
@@ -49,11 +45,11 @@ end = struct
          Log.err (fun k->k"cannot find clause %S" n);
          [||])
     | Ast.Clause.Clause lits ->
-      Array.of_list lits |> Array.map (norm_lit st)
+      Array.of_list lits |> Array.map (norm_term st)
 
   (** A different type for proofs *)
   type normalized_proof = {
-    p: (T.t, lit array, normalized_proof) view;
+    p: (T.t, T.t array, normalized_proof) view;
   }
 
   let rec norm_proof (st:state) (p:t) : normalized_proof =
@@ -62,8 +58,8 @@ end = struct
       |> map_view (norm_term st) (norm_clause st) (norm_proof st)
     }
 
-  let pp_lits out (c:lit array) =
-    Fmt.fprintf out "cl {@[<hv>%a@]}" Fmt.(array ~sep:(return "@ ∨ ") Ast.Lit.pp) c
+  let pp_lits out (c:T.t array) =
+    Fmt.fprintf out "cl {@[<hv>%a@]}" Fmt.(array ~sep:(return "@ ∨ ") T.pp) c
 
   (* allocate new name *)
   let new_name (st:state): name =
@@ -117,7 +113,7 @@ end = struct
       Hashtbl.replace state.terms name rhs
     | S_step_c {name; res; proof} ->
       if not (Hashtbl.mem state.printed name) then (
-        let res = Array.of_list res |> Array.map (norm_lit state) in
+        let res = Array.of_list res |> Array.map (norm_term state) in
         Hashtbl.add state.printed name ();
         Hashtbl.add state.clauses name res;
 

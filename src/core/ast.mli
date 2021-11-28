@@ -34,6 +34,7 @@ module Term : sig
     | Fun of 'ty Var.t * 't
     | Var of 'ty option Var.t
     | Ite of 't * 't * 't
+    | Not of 't
     | As of 't * Ty.t (* cast *)
     | Let of (unit Var.t * 't) list * 't
     | Ref of string
@@ -52,6 +53,7 @@ module Term : sig
   val ref : loc:Loc.t option -> string -> t
   val var : loc:Loc.t option -> Ty.t option Var.t -> t
   val eq : loc:Loc.t option -> t -> t -> t
+  val not: loc:Loc.t option -> t -> t
   val app_var : loc:Loc.t option -> Ty.t option Var.t -> t list -> t
   val app_name : loc:Loc.t option -> Name.t -> t list -> t
   val const : loc:Loc.t option -> Name.t -> t
@@ -69,24 +71,9 @@ module Subst : sig
   [@@deriving show]
 end
 
-module Lit : sig
-  type t = {
-    sign: bool [@default true];
-    atom: term [@main];
-  } [@@deriving show, make]
-
-  val a : term -> t
-  val na : term -> t
-  val not : t -> t
-
-  val map_term : (term -> term) -> t -> t
-end
-
-type lit = Lit.t
-
 module Clause : sig
   type t =
-    | Clause of lit list
+    | Clause of term list
     | Clause_ref of Name.t
   [@@deriving show]
 end
@@ -121,7 +108,7 @@ module Proof : sig
   type 'proof composite_step =
     | S_step_c of {
         name: string; (* name *)
-        res: lit list; (* result of [proof] *)
+        res: term list; (* result of [proof] *)
         proof: 'proof; (* sub-proof *)
       }
     | S_define_t of string * term (* [const := t] *)
@@ -167,14 +154,13 @@ module Proof : sig
     | Bool_true_neq_false
     | Bool_eq of 'term * 'term (* equal by pure boolean reasoning *)
     | Bool_c of bool_c_name * 'term list (* boolean tautology *)
-    | Nn of 'proof
     | Ite_true of 'term (* given [if a b c] returns [a=T |- if a b c=b] *)
     | Ite_false of 'term
     | LRA of 'clause
     | With of with_bindings * 'proof
     | Composite of {
         (* some named (atomic) assumptions *)
-        assumptions: (string * lit) list;
+        assumptions: (string * 'term) list;
         steps: 'proof composite_step array; (* last step is the proof *)
       }
   [@@deriving show {with_path=false}, map, iter]
@@ -193,7 +179,7 @@ module Proof : sig
   val p1 : t -> t hres_step
   (** Unit paramodulation *)
 
-  val stepc : name:string -> lit list -> t -> t composite_step
+  val stepc : name:string -> term list -> t -> t composite_step
 
   val deft : string -> term -> t composite_step (** define a (new) atomic term *)
 
@@ -221,7 +207,7 @@ module Proof : sig
   val cc_lemma : Clause.t -> t
   val cc_imply2 : t -> t -> term -> term -> t (* tautology [p1, p2 |- t=u] *)
   val cc_imply_l : t list -> term -> term -> t (* tautology [hyps |- t=u] *)
-  val composite_l : ?assms:(string * lit) list -> t composite_step list -> t
+  val composite_l : ?assms:(string * term) list -> t composite_step list -> t
   val rup_res : clause -> t list -> t
   val paramod1 : rw_with:t -> t -> t
   val clause_rw : res:clause -> using:t list -> t -> t
@@ -238,7 +224,6 @@ module Proof : sig
 
   val bool_eq : term -> term -> t
   val bool_c : bool_c_name -> term list -> t
-  val nn : t -> t
   val ite_true : term -> t
   val ite_false : term -> t
 

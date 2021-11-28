@@ -396,6 +396,9 @@ module Make(A : ARG) : S = struct
                 end
             end
         end
+      | T.Not u ->
+        let u = conv_term u in
+        E.app ctx Cst.not_ u
       | T.Ite (a,b,c) ->
         let ite = get_builtin_ B.If in
         let a = conv_term a in
@@ -428,12 +431,14 @@ module Make(A : ARG) : S = struct
          K.Subst.bind s v t)
       K.Subst.empty s
 
-  let conv_lit (lit: Ast.lit) : Lit.t =
-    let {Ast.Lit.sign; atom} = lit in
-    Lit.make sign (conv_term atom)
+  let conv_lit (t: Ast.term) : Lit.t =
+    let t = conv_term t in
+    match unfold_not_ t with
+    | Some u -> Lit.make false u
+    | None -> Lit.make true t
 
-  let conv_lits (lits: Ast.lit list) : Clause.t =
-    Log.debug (fun k->k"conv-lits %a" (Fmt.Dump.list Ast.Lit.pp) lits);
+  let conv_lits (lits: Ast.term list) : Clause.t =
+    Log.debug (fun k->k"conv-lits %a" (Fmt.Dump.list Ast.Term.pp) lits);
     let cl = Clause.empty in
     List.fold_left
       (fun c lit -> Clause.add (conv_lit lit) c)
@@ -804,20 +809,6 @@ module Make(A : ARG) : S = struct
       | P.Bool_c (name, ts) ->
         let ts = List.map conv_term ts in
         check_bool_c p name ts
-
-      | P.Nn p ->
-        let c = check_proof_or_empty_ p in
-
-        let c =
-          Clause.lits c
-          |> Iter.map
-            (fun lit ->
-               match unfold_not_ (Lit.atom lit) with
-               | Some u -> Lit.make (not (Lit.sign lit)) u
-               | None -> lit)
-          |> Clause.of_iter
-        in
-        true, c
 
       | P.Bool_true_is_true ->
         let true_ = E.const ctx (get_builtin_ B.True) [] in

@@ -119,15 +119,9 @@ module Proof = struct
     | List l -> of_l l
     | Atom _ -> parse_errorf sexp "expected substitution of shape `(<var> <term> …)`"
 
-  let lit_of_sexp (sexp:sexp) : A.lit =
-    match sexp.s with
-    | List [{s=Atom "+";_}; t] -> A.Lit.a (t_of_sexp t)
-    | List [{s=Atom "-";_}; t] -> A.Lit.na (t_of_sexp t)
-    | _ -> parse_errorf sexp "expected `(± <term>)`"
-
-  let lits_of_sexp s : A.lit list =
+  let lits_of_sexp s : A.term list =
     match s.s with
-    | List ({s=Atom "cl";_} :: lits) -> List.map lit_of_sexp lits
+    | List ({s=Atom "cl";_} :: lits) -> List.map t_of_sexp lits
     | _ -> parse_errorf s "expected a clause `(cl t1 t2 … tn)`"
 
   (** Parse clause *)
@@ -136,14 +130,14 @@ module Proof = struct
     | List [{s=Atom ("@"|"ref");_}; {s=Atom name;_}] ->
       A.Clause.Clause_ref name
     | List ({s=Atom "cl";_} :: lits) ->
-      let c_lits = List.map lit_of_sexp lits in
+      let c_lits = List.map t_of_sexp lits in
       A.Clause.Clause c_lits
     | _ -> parse_errorf s "expected a clause `(cl t1 t2 … tn)` or `(@ <name>)`"
 
   let asm_of_sexp s =
     match s.s with
     | List [{s=Atom name;_}; lit] ->
-      let lit = lit_of_sexp lit in
+      let lit = t_of_sexp lit in
       name, lit
     | _ -> parse_errorf s "expected an assumption `(<name> <lit>)`"
 
@@ -175,10 +169,6 @@ module Proof = struct
       let u = t_of_sexp u in
       let prs = List.map p_of_sexp prs in
       P.cc_imply_l prs t u
-
-    | List [{s=Atom "nn";_}; p] ->
-      let p = p_of_sexp p in
-      P.nn p
 
     | List ({s=Atom "bool-c";_} :: ({s=Atom name;_} as s_name) :: ts) ->
       let ts = List.map t_of_sexp ts in

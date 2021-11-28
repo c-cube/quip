@@ -45,6 +45,12 @@ module Make(A : ARG) : S = struct
     let not_ : K.expr = find_ "not" Quip_core.Builtin.Not
   end
 
+  (* turn [not e] into [Some e], any other term into [None] *)
+  let unfold_not_ (e:E.t) : E.t option =
+    match E.view e with
+    | E.E_app (f, u) when E.equal f Cst.not_ -> Some u
+    | _ -> None
+
   (* always normalize equations so that the order in which they were
      input does not matter *)
   let normalize_expr_ e =
@@ -86,6 +92,10 @@ module Make(A : ARG) : S = struct
 
     let[@inline] make sign expr =
       let expr = normalize_expr_ expr in
+      let expr, sign = match unfold_not_ expr with
+        | Some u -> u, not sign
+        | _ -> expr, sign
+      in
       {sign;expr}
 
     let to_expr (self:t) : K.expr =
@@ -269,13 +279,6 @@ module Make(A : ARG) : S = struct
         | None -> false
       end
     | _ -> false
-
-  (* turn [not e] into [Some e], any other term into [None] *)
-  let unfold_not_ (e:E.t) : E.t option =
-    match E.view e with
-    | E.E_app (f, u) when E.equal f Cst.not_ -> Some u
-    | _ -> None
-
 
   (* find builtin [b] *)
   let get_builtin_ b =

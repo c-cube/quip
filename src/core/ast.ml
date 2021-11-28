@@ -68,6 +68,12 @@ module Term = struct
   let ite ~loc a b c : t = mk_ ~loc (Ite (a,b,c))
   let ref ~loc s : t = mk_ ~loc (Ref s)
 
+  let rec rw ~(rule:t -> t option) (self:t) : t =
+    match rule self with
+    | Some u -> rw ~rule u
+    | None ->
+      {self with view=map_view (rw ~rule) (fun ty->ty) self.view}
+
   let rec pp out t = match t.view with
     | Var v -> Var.pp_name out v
     | App (f, l) ->
@@ -108,6 +114,8 @@ module Lit = struct
 
   let a t = make ~sign:true t
   let na t = make ~sign:false t
+
+  let map_term f lit = {lit with atom=f lit.atom}
 end
 
 type lit = Lit.t [@@deriving show]
@@ -127,46 +135,7 @@ end
 type clause = Clause.t [@@deriving show]
 
 module Proof = struct
-  type view =
-    | Sorry (* NOTE: v. bad as we don't even specify the return *)
-    | Sorry_c of clause (* TODO: also specify parents, so we still know the DAG *)
-    | Named of string (* refers to previously defined clause *)
-    | Refl of term
-    | CC_lemma_imply of t list * term * term
-    | CC_lemma of clause
-    | Clause_rw of {
-        res: clause;
-        c0: t;
-        using: t list; (** the rewriting equations/atoms *)
-      }
-    | Assert of term
-    | Assert_c of clause
-    | Rup_res of clause * t list
-    | Hres of t * hres_step list
-    | Res of { pivot: term; p1: t; p2: t }
-    | Res1 of { p1: t; p2: t }
-    | Paramod1 of { rw_with: t; p: t}
-    | Subst of Subst.t * t
-    | DT_isa_split of ty * term list
-    | DT_isa_disj of ty * term * term
-    | DT_cstor_inj of Name.t * int * term list * term list (* [c t…=c u… |- t_i=u_i] *)
-    | Bool_true_is_true
-    | Bool_true_neq_false
-    | Bool_eq of term * term (* equal by pure boolean reasoning *)
-    | Bool_c of bool_c_name * term list (* boolean tautology *)
-    | Nn of t
-    | Ite_true of term (* given [if a b c] returns [a=T |- if a b c=b] *)
-    | Ite_false of term
-    | LRA of clause
-    | With of with_bindings * t
-    | Composite of {
-        (* some named (atomic) assumptions *)
-        assumptions: (string * lit) list;
-        steps: composite_step array; (* last step is the proof *)
-      }
-  [@@deriving show {with_path=false}]
-
-  and bool_c_name =
+  type bool_c_name =
     | And_i
     | And_e
     | Or_i
@@ -181,13 +150,18 @@ module Proof = struct
     | Xor_e
   [@@deriving show {with_path=false}]
 
-  and t=view
+  type 'proof hres_step =
+    | R of { pivot: term; p: 'proof}
+    | R1 of 'proof
+    | P of { lhs: term; rhs: term; p: 'proof}
+    | P1 of 'proof
+  [@@deriving show {with_path=false}, map, iter]
 
-  and composite_step =
+  type 'proof composite_step =
     | S_step_c of {
         name: string; (* name *)
         res: lit list; (* result of [proof] *)
-        proof: t; (* sub-proof *)
+        proof: 'proof; (* sub-proof *)
       }
     | S_define_t of string * term (* [const := t] *)
     | S_declare_ty_const of {
@@ -203,78 +177,105 @@ module Proof = struct
         ty: Ty.t;
         rhs: term;
       }
-  [@@deriving show {with_path=false}]
+  [@@deriving show {with_path=false}, map, iter]
 
-    (* TODO: be able to name clauses, to be expanded at parsing.
-       note that this is not the same as [S_step_c] which defines an
-       explicit step with a conclusion and proofs that can be exploited
-       separately.
+  type ('term, 'clause, 'proof) view =
+    | Sorry (* NOTE: v. bad as we don't even specify the return *)
+    | Sorry_c of 'clause (* TODO: also specify parents, so we still know the DAG *)
+    | Named of string (* refers to previously defined 'clause *)
+    | Refl of 'term
+    | CC_lemma_imply of 'proof list * 'term * 'term
+    | CC_lemma of 'clause
+    | Clause_rw of {
+        res: 'clause;
+        c0: 'proof;
+        using: 'proof list; (** the rewriting equations/atoms *)
+      }
+    | Assert of 'term
+    | Assert_c of 'clause
+    | Rup_res of 'clause * 'proof list
+    | Hres of 'proof * 'proof hres_step list
+    | Res of { pivot: 'term; p1: 'proof; p2: 'proof }
+    | Res1 of { p1: 'proof; p2: 'proof }
+    | Paramod1 of { rw_with: 'proof; p: 'proof}
+    | Subst of Subst.t * 'proof
+    | DT_isa_split of ty * 'term list
+    | DT_isa_disj of ty * 'term * 'term
+    | DT_cstor_inj of Name.t * int * 'term list * 'term list (* [c 'proof…=c u… |- t_i=u_i] *)
+    | Bool_true_is_true
+    | Bool_true_neq_false
+    | Bool_eq of 'term * 'term (* equal by pure boolean reasoning *)
+    | Bool_c of bool_c_name * 'term list (* boolean tautology *)
+    | Nn of 'proof
+    | Ite_true of 'term (* given [if a b c] returns [a=T |- if a b c=b] *)
+    | Ite_false of 'term
+    | LRA of 'clause
+    | With of with_bindings * 'proof
+    | Composite of {
+        (* some named (atomic) assumptions *)
+        assumptions: (string * lit) list;
+        steps: 'proof composite_step array; (* last step is the proof *)
+      }
+  [@@deriving show {with_path=false}, map, iter]
 
-       We could introduce that in Compress.rename…
+  type t = {view: (term, clause, t) view}
+  [@@unboxed]
+  [@@deriving show {with_path=false} ]
 
-    | S_define_c of string * clause (* [name := c] *)
-     *)
+  let[@inline] view p = p.view
 
-  and hres_step =
-    | R of { pivot: term; p: t}
-    | R1 of t
-    | P of { lhs: term; rhs: term; p: t}
-    | P1 of t
-  [@@deriving show]
-
-  let[@inline] view p = p
-
-  let r p ~pivot : hres_step = R { pivot; p }
+  let r p ~pivot : _ hres_step = R { pivot; p }
   let r1 p = R1 p
-  let p p ~lhs ~rhs : hres_step = P { p; lhs; rhs }
+  let p p ~lhs ~rhs : _ hres_step = P { p; lhs; rhs }
   let p1 p = P1 p
 
-  let stepc ~name res proof : composite_step = S_step_c {proof;name;res}
-  let deft c rhs : composite_step = S_define_t (c,rhs)
-  let decl_const name ty : composite_step = S_declare_const {name;ty}
-  let decl_ty_const name arity : composite_step = S_declare_ty_const {name;arity}
-  let define_const name ty rhs : composite_step = S_define_const {name;ty;rhs}
+  let stepc ~name res proof : _ composite_step = S_step_c {proof;name;res}
+  let deft c rhs : _ composite_step = S_define_t (c,rhs)
+  let decl_const name ty : _ composite_step = S_declare_const {name;ty}
+  let decl_ty_const name arity : _ composite_step = S_declare_ty_const {name;arity}
+  let define_const name ty rhs : _ composite_step = S_define_const {name;ty;rhs}
 
   let is_trivial_refl = function
-    | Refl _ -> true
+    | {view=Refl _;_} -> true
     | _ -> false
 
-  let sorry_c c = Sorry_c c
-  let sorry = Sorry
-  let refl t : t = Refl t
-  let ref_by_name name : t = Named name
-  let cc_lemma c : t = CC_lemma c
-  let cc_imply_l l t u : t = CC_lemma_imply (l, t, u)
-  let cc_imply2 h1 h2 t u : t = CC_lemma_imply ([h1; h2], t, u)
-  let assertion t = Assert t
-  let assertion_c c = Assert_c c
+  let[@inline] mk view : t = {view}
+  let sorry_c c : t = mk @@ Sorry_c c
+  let sorry = mk @@ Sorry
+  let refl t : t = mk @@ Refl t
+  let ref_by_name name : t = mk @@ Named name
+  let cc_lemma c : t = mk @@ CC_lemma c
+  let cc_imply_l l t u : t = mk @@ CC_lemma_imply (l, t, u)
+  let cc_imply2 h1 h2 t u : t = mk @@ CC_lemma_imply ([h1; h2], t, u)
+  let assertion t = mk @@ Assert t
+  let assertion_c c = mk @@ Assert_c c
   let composite_l ?(assms=[]) steps : t =
-    Composite {assumptions=assms; steps=Array.of_list steps}
+    mk @@ Composite {assumptions=assms; steps=Array.of_list steps}
 
-  let with_ bs p : t = With (bs,p)
+  let with_ bs p : t = mk @@ With (bs,p)
 
-  let isa_split ty l = DT_isa_split (ty, l)
-  let isa_disj ty t u = DT_isa_disj (ty, t, u)
-  let cstor_inj c i t u = DT_cstor_inj (c, i, t, u)
+  let isa_split ty l = mk @@ DT_isa_split (ty, l)
+  let isa_disj ty t u = mk @@ DT_isa_disj (ty, t, u)
+  let cstor_inj c i t u = mk @@ DT_cstor_inj (c, i, t, u)
 
-  let ite_true t = Ite_true t
-  let ite_false t = Ite_false t
-  let true_is_true : t = Bool_true_is_true
-  let true_neq_false : t = Bool_true_neq_false
-  let bool_eq a b : t = Bool_eq (a,b)
-  let bool_c name c : t = Bool_c (name, c)
-  let nn p : t = Nn p
+  let ite_true t = mk @@ Ite_true t
+  let ite_false t = mk @@ Ite_false t
+  let true_is_true : t = mk @@ Bool_true_is_true
+  let true_neq_false : t = mk @@ Bool_true_neq_false
+  let bool_eq a b : t = mk @@ Bool_eq (a,b)
+  let bool_c name c : t = mk @@ Bool_c (name, c)
+  let nn p : t = mk @@ Nn p
 
-  let rup_res c hyps : t = Rup_res (c, hyps)
-  let clause_rw ~res ~using c0 : t = Clause_rw {res; using; c0}
-  let paramod1 ~rw_with p : t = Paramod1 {rw_with; p}
+  let rup_res c hyps : t = mk @@ Rup_res (c, hyps)
+  let clause_rw ~res ~using c0 : t = mk @@ Clause_rw {res; using; c0}
+  let paramod1 ~rw_with p : t = mk @@ Paramod1 {rw_with; p}
 
-  let hres_l c l : t = Hres (c,l)
-  let res ~pivot p1 p2 : t = Res{pivot;p1;p2}
-  let res1 p1 p2 : t = Res1{p1;p2}
-  let subst s p : t = Subst(s,p)
+  let hres_l c l : t = mk @@ Hres (c,l)
+  let res ~pivot p1 p2 : t = mk @@ Res{pivot;p1;p2}
+  let res1 p1 p2 : t = mk @@ Res1{p1;p2}
+  let subst s p : t = mk @@ Subst(s,p)
 
-  let lra_l c : t = LRA c
+  let lra_l c : t = mk @@ LRA c
 
   let pp_debug = pp
 end

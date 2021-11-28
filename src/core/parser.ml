@@ -275,7 +275,7 @@ module Proof = struct
     | _ -> parse_errorf s "expected a proof"
 
   (** Parse a composite step *)
-  and step_of_sexp (s:sexp) : P.composite_step =
+  and step_of_sexp (s:sexp) : _ P.composite_step =
     match s.s with
     | List [{s=Atom "deft";_}; {s=Atom name;loc=_}; t] ->
       let t = t_of_sexp t in

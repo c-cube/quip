@@ -1030,7 +1030,7 @@ module Make(A : ARG) : S = struct
           (remove lit_eqn c2)
       )
 
-  and check_hres_step_ (c1: Clause.t) (step:P.hres_step) : Clause.t =
+  and check_hres_step_ (c1: Clause.t) (step:_ P.hres_step) : Clause.t =
     begin match step with
       | P.R {pivot; p} ->
         let pivot = conv_term pivot in
@@ -1066,7 +1066,7 @@ module Make(A : ARG) : S = struct
         | None -> fail()
     end
 
-  and check_composite_step_ (step: Ast.Proof.composite_step) : Clause.t option =
+  and check_composite_step_ (step: _ Ast.Proof.composite_step) : Clause.t option =
    begin match step with
     | P.S_define_t (name, u) ->
       let u = conv_term u in

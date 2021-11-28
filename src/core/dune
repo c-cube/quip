@@ -5,5 +5,4 @@
   (synopsis "Core AST and parser for Quip")
   (libraries smtlib-utils trustee.core containers logs
              ppx_deriving.runtime)
-  (preprocess (pps ppx_deriving.std))
-  (flags :standard -warn-error -a+8))
+  (preprocess (pps ppx_deriving.std)))

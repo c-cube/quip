@@ -97,7 +97,9 @@ end = struct
     in
 
     (* define *)
-    add_linef state {|@[%s [label="%s", shape="box"];@]|} name label;
+    add_linef state
+      {|@[%s [label="%s", shape="box", style="filled", color="lavenderblush1"];@]|}
+      name label;
 
     (* add edges *)
     List.iter (fun n' -> add_linef state {|@[%s -> %s [label="%s"]@]|} name n' n') !links;
@@ -121,9 +123,11 @@ end = struct
           Fmt.asprintf "%a" pp_lits res |> cleanup_str
         in
 
-        add_linef state {|@[%s [label="%s",shape="box"]@]|} name label;
+        add_linef state
+          {|@[%s [label="%s",shape="box",color="%s",style="filled"]@]|}
+          name label (if res=[||] then "red" else "cyan");
         let p = pp_proof_itself state proof in
-        add_linef state {|@[%s -> %s [label="%s"]@]|} name p name;
+        add_linef state {|@[%s -> %s [label="proof(%s)"]@]|} name p name;
       );
       ()
 

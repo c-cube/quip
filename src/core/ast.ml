@@ -83,7 +83,7 @@ module Term = struct
     | App (f, l) ->
       Fmt.fprintf out "(@[%a@ %a@])" pp f (pp_l pp) l
     | Ite (a,b,c) -> Fmt.fprintf out "(@[ite@ %a@ %a@ %a@])" pp a pp b pp c
-    | Not u -> Fmt.fprintf out "(@[not@ %a@])" pp u
+    | Not u -> Fmt.fprintf out "(@[@<1>¬@ %a@])" pp u
     | Let (bs, bod) ->
       let ppb out (v,t) = Fmt.fprintf out "(@[%a@ %a@])" Var.pp_name v pp t in
       Fmt.fprintf out "(@[let@ (@[%a@]@ %a@])" (pp_l ppb) bs pp bod

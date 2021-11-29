@@ -5,10 +5,11 @@ module Log = (val Logs.src_log (Logs.Src.create "quip.main"))
 
 (* check proof for problem, then exits *)
 let main ~quiet ~problem proof : 'a =
+  let chrono = Chrono.start() in
   Log.info (fun k->k"process proof '%s' with problem %a" proof (Fmt.opt Fmt.string_quoted) problem);
   let proof = with_file_in proof (Parser.Proof.parse_chan ~filename:proof) in
   if not quiet then (
-    Log.info (fun k->k"parsed proof");
+    Log.info (fun k->k"parsed proof (in %.3fs)" @@ Chrono.elapsed chrono);
     Log.debug (fun k->k"parsed proof:@ %a" Ast.Proof.pp proof);
   );
   let ctx = K.Ctx.create() in
@@ -32,6 +33,7 @@ let main ~quiet ~problem proof : 'a =
     Fmt.printf "@{<Red>FAIL@}@.";
     Fmt.printf "; bad steps: %s@." (String.concat ", " bad_steps);
   );
+  Fmt.printf "; done in %.3fs@." (Chrono.elapsed chrono);
   exit (if proof_valid then 0 else 1)
 
 let () =

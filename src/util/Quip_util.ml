@@ -32,3 +32,13 @@ let with_file_in (file:string) f =
       ~h:(fun () -> Unix.close_process_in p)
       f p
   ) else CCIO.with_in file f
+
+module Chrono : sig
+  type t
+  val start : unit -> t
+  val elapsed: t -> float
+end = struct
+  type t = float
+  let start () = Unix.gettimeofday()
+  let elapsed self = Unix.gettimeofday() -. self
+end

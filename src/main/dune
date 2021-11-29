@@ -7,7 +7,8 @@
   (public_name quip)
   (modules quip)
   (libraries quip.core quip.util quip.check trustee.core
-             smtlib-utils containers ppx_deriving.runtime)
+             smtlib-utils containers
+             unix ppx_deriving.runtime)
   (preprocess (pps ppx_deriving.std)))
 
 (executable

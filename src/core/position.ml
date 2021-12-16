@@ -1,4 +1,4 @@
-open Common
+module Fmt = CCFormat
 
 type t = {
   line: int;

@@ -8,13 +8,18 @@ module Name : sig
 end
 
 module Ty : sig
-  type t =
+  type t = {
+    view: view;
+    loc: Loc.t
+  }
+  and view =
     | Constr of Name.t * t list
     | Arrow of t list * t
-  [@@deriving show]
 
-  val constr : Name.t -> t list -> t
-  val arrow : t list -> t -> t
+  val pp : t Fmt.printer
+
+  val constr : loc:Loc.t -> Name.t -> t list -> t
+  val arrow : loc:Loc.t -> t list -> t -> t
 end
 
 type ty = Ty.t
@@ -72,10 +77,16 @@ module Subst : sig
 end
 
 module Clause : sig
-  type t =
+  type t = {
+    view: view;
+    loc: Loc.t
+  }
+  and view =
     | Clause of term list
     | Clause_ref of Name.t
-  [@@deriving show]
+
+  val pp : t Fmt.printer
+  val mk : loc:Loc.t -> view -> t
 end
 
 type clause = Clause.t
@@ -98,14 +109,22 @@ module Proof : sig
     | Xor_e
   [@@deriving show {with_path=false}]
 
-  type 'proof hres_step =
+  type 'proof hres_step = {
+    view: 'proof hres_step_view;
+    loc: Loc.t;
+  }
+  and 'proof hres_step_view =
     | R of { pivot: term; p: 'proof}
     | R1 of 'proof
     | P of { lhs: term; rhs: term; p: 'proof}
     | P1 of 'proof
   [@@deriving show {with_path=false}, map, iter]
 
-  type 'proof composite_step =
+  type 'proof composite_step = {
+    view: 'proof composite_step_view;
+    loc: Loc.t;
+  }
+  and 'proof composite_step_view =
     | S_step_c of {
         name: string; (* name *)
         res: term list; (* result of [proof] *)
@@ -166,66 +185,67 @@ module Proof : sig
   [@@deriving show {with_path=false}, map, iter]
 
   val view : t -> (term,clause,t) view
+  val loc : t -> Loc.t
 
-  val r : t -> pivot:term -> t hres_step
+  val r : loc:Loc.t -> t -> pivot:term -> t hres_step
   (** Resolution step on given pivot term *)
 
-  val r1 : t -> t hres_step
+  val r1 : loc:Loc.t -> t -> t hres_step
   (** Unit resolution; pivot is obvious *)
 
-  val p : t -> lhs:term -> rhs:term -> t hres_step
+  val p : loc:Loc.t -> t -> lhs:term -> rhs:term -> t hres_step
   (** Paramodulation using proof whose conclusion has a literal [lhs=rhs] *)
 
-  val p1 : t -> t hres_step
+  val p1 : loc:Loc.t -> t -> t hres_step
   (** Unit paramodulation *)
 
-  val stepc : name:string -> term list -> t -> t composite_step
+  val stepc : loc:Loc.t -> name:string -> term list -> t -> t composite_step
 
-  val deft : string -> term -> t composite_step (** define a (new) atomic term *)
+  val deft : loc:Loc.t -> string -> term -> t composite_step (** define a (new) atomic term *)
 
-  val decl_const : string -> Ty.t -> t composite_step
+  val decl_const : loc:Loc.t -> string -> Ty.t -> t composite_step
 
-  val decl_ty_const : string -> int -> t composite_step
+  val decl_ty_const : loc:Loc.t -> string -> int -> t composite_step
 
-  val define_const : string -> Ty.t -> term -> t composite_step
+  val define_const : loc:Loc.t -> string -> Ty.t -> term -> t composite_step
 
   val is_trivial_refl : t -> bool
   (** is this a proof of [|- t=t]? This can be used to remove
       some trivial steps that would build on the proof (e.g. rewriting
       using [refl t] is useless). *)
 
-  val assertion : term -> t
-  val ref_by_name : string -> t (* named clause, see {!defc} *)
-  val assertion_c : Clause.t -> t
-  val hres_l : t -> t hres_step list -> t (* hyper-res *)
-  val res : pivot:term -> t -> t -> t
-  val res1 : t -> t -> t
-  val subst : Subst.t -> t -> t
-  val refl : term -> t (* proof of [| t=t] *)
-  val true_is_true : t (* proof of [|- true] *)
-  val true_neq_false : t (* proof of [|- not (true=false)] *)
-  val cc_lemma : Clause.t -> t
-  val cc_imply2 : t -> t -> term -> term -> t (* tautology [p1, p2 |- t=u] *)
-  val cc_imply_l : t list -> term -> term -> t (* tautology [hyps |- t=u] *)
-  val composite_l : ?assms:(string * term) list -> t composite_step list -> t
-  val rup_res : clause -> t list -> t
-  val paramod1 : rw_with:t -> t -> t
-  val clause_rw : res:clause -> using:t list -> t -> t
-  val sorry : t
-  val sorry_c : Clause.t -> t
+  val assertion : loc:Loc.t -> term -> t
+  val ref_by_name : loc:Loc.t -> string -> t (* named clause, see {!defc} *)
+  val assertion_c : loc:Loc.t -> Clause.t -> t
+  val hres_l : loc:Loc.t -> t -> t hres_step list -> t (* hyper-res *)
+  val res : loc:Loc.t -> pivot:term -> t -> t -> t
+  val res1 : loc:Loc.t -> t -> t -> t
+  val subst : loc:Loc.t -> Subst.t -> t -> t
+  val refl : loc:Loc.t -> term -> t (* proof of [| t=t] *)
+  val true_is_true : loc:Loc.t -> t (* proof of [|- true] *)
+  val true_neq_false : loc:Loc.t -> t (* proof of [|- not (true=false)] *)
+  val cc_lemma : loc:Loc.t -> Clause.t -> t
+  val cc_imply2 : loc:Loc.t -> t -> t -> term -> term -> t (* tautology [p1, p2 |- t=u] *)
+  val cc_imply_l : loc:Loc.t -> t list -> term -> term -> t (* tautology [hyps |- t=u] *)
+  val composite_l : loc:Loc.t -> ?assms:(string * term) list -> t composite_step list -> t
+  val rup_res : loc:Loc.t -> clause -> t list -> t
+  val paramod1 : loc:Loc.t -> rw_with:t -> t -> t
+  val clause_rw : loc:Loc.t -> res:clause -> using:t list -> t -> t
+  val sorry : loc:Loc.t -> t
+  val sorry_c : loc:Loc.t -> Clause.t -> t
 
-  val with_ : with_bindings -> t -> t
+  val with_ : loc:Loc.t -> with_bindings -> t -> t
 
   val pp_debug : t Fmt.printer
 
-  val isa_split : ty -> term list -> t
-  val isa_disj : ty -> term -> term -> t
-  val cstor_inj : Name.t -> int -> term list -> term list -> t
+  val isa_split : loc:Loc.t -> ty -> term list -> t
+  val isa_disj : loc:Loc.t -> ty -> term -> term -> t
+  val cstor_inj : loc:Loc.t -> Name.t -> int -> term list -> term list -> t
 
-  val bool_eq : term -> term -> t
-  val bool_c : bool_c_name -> term list -> t
-  val ite_true : term -> t
-  val ite_false : term -> t
+  val bool_eq : loc:Loc.t -> term -> term -> t
+  val bool_c : loc:Loc.t -> bool_c_name -> term list -> t
+  val ite_true : loc:Loc.t -> term -> t
+  val ite_false : loc:Loc.t -> term -> t
 
-  val lra_l : Clause.t -> t
+  val lra_l : loc:Loc.t -> Clause.t -> t
 end

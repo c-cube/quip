@@ -14,7 +14,7 @@ type stats = {
 } [@@deriving show {with_path=false}]
 
 module type S = sig
-  val check_proof : Ast.Proof.t -> bool * bad list * stats
+  val check_proof : Ast.Proof.t -> bool * bad list * Error.t list * stats
 end
 
 type t = (module S)
@@ -31,18 +31,18 @@ module Make(A : ARG) : S = struct
 
   let unwrap_or_ msg = function
     | Some x -> x
-    | None -> error msg
+    | None -> Error.raise (msg ())
 
   (** {2 Some constants} *)
   module Cst = struct
-    let find_ name builtin =
+    let find_ ~loc name builtin =
       let c =
         Problem.find_builtin builtin
-        |> unwrap_or_ ("cannot find builtin " ^ name)
+        |> unwrap_or_ (fun() -> Error.makef ~loc "cannot find builtin %s" name)
       in
       K.Expr.const ctx c []
 
-    let not_ : K.expr = find_ "not" Quip_core.Builtin.Not
+    let not_ : K.expr = find_ ~loc:Loc.none "not" Quip_core.Builtin.Not
   end
 
   (* turn [not e] into [Some e], any other term into [None] *)
@@ -281,16 +281,16 @@ module Make(A : ARG) : S = struct
     | _ -> false
 
   (* find builtin [b] *)
-  let get_builtin_ b =
+  let get_builtin_ ~loc b =
     match Problem.find_builtin b with
     | Some c -> c
-    | None -> errorf "cannot find builtin %a" B.pp b
+    | None -> Error.failf ~loc "cannot find builtin %a" B.pp b
 
   (* takes [|- a] and [|- ¬a] and returns [|- false] *)
   let prove_false =
     let v = K.Var.make "A" (E.bool ctx) in
     let e_v = E.var ctx v in
-    let false_ = E.const ctx (get_builtin_ B.False) [] in
+    let false_ = E.const ctx (get_builtin_ ~loc:Loc.none B.False) [] in
     let th0 = Thm.axiom ctx [e_v; E.app ctx Cst.not_ e_v] false_ in
     fun _ctx (th1: Thm.t) (th2: Thm.t) : Thm.t ->
       let e = Thm.concl th1 in
@@ -299,8 +299,8 @@ module Make(A : ARG) : S = struct
       Thm.cut ctx th1 @@ Thm.cut ctx th2 th0'
 
   (* unfold builtin application. *)
-  let unfold_builtin b e : _ list option =
-    let cb = get_builtin_ b in
+  let unfold_builtin ~loc b e : _ list option =
+    let cb = get_builtin_ ~loc b in
     let rec aux e =
       let f, args = E.unfold_app e in
       match E.view f with
@@ -321,10 +321,38 @@ module Make(A : ARG) : S = struct
     in
     aux e
 
+  (** A custom error list, with a cap on storage *)
+  module Error_list : sig
+    type t
+    val create : ?max:int -> unit -> t
+    val push : t -> Error.t -> unit
+    val n_errors : t -> int
+    val get_l : t -> Error.t list
+  end = struct
+    type t = {
+      mutable n: int;
+      mutable errs: Error.t list;
+      max: int;
+    }
+
+    let create ?(max=10) () : t =
+      { errs=[]; max; n=0 }
+
+    let push self e =
+      self.n <- self.n + 1;
+      if self.n < self.max then (
+        self.errs <- e :: self.errs
+      )
+
+    let n_errors self = self.n
+    let get_l self = List.rev self.errs
+  end
+
   type st = {
     checked: (string, Clause.t) Hashtbl.t;
     named_terms: (string, K.expr) Hashtbl.t;
     named_clauses: (string, Clause.t) Hashtbl.t;
+    errors: Error_list.t;
     mutable bad: bad list;
     mutable n_valid: int;
     mutable n_invalid: int;
@@ -336,6 +364,7 @@ module Make(A : ARG) : S = struct
     let _c = K.Expr.new_ty_const ctx " <dummy>" 0 in
     {
       checked = Hashtbl.create 32;
+      errors=Error_list.create();
       named_terms = Hashtbl.create 16;
       named_clauses = Hashtbl.create 16;
       bad=[];
@@ -344,7 +373,8 @@ module Make(A : ARG) : S = struct
     }
 
   let rec conv_ty (ty: Ast.ty) : K.ty =
-    match ty with
+    let loc = ty.loc in
+    match ty.view with
     | Ast.Ty.Arrow (args, ret) ->
       let args = List.map conv_ty args in
       let ret = conv_ty ret in
@@ -353,7 +383,7 @@ module Make(A : ARG) : S = struct
       (* FIXME: type variables *)
       begin match Problem.find_ty_const_by_name s with
         | None ->
-          errorf "cannot convert unknown type constant `%s`" s
+          Error.failf ~loc "cannot convert unknown type constant `%s`" s
         | Some c ->
           let args = List.map conv_ty args in
           E.const ctx c args
@@ -362,6 +392,7 @@ module Make(A : ARG) : S = struct
   let rec conv_term (t: Ast.term) : K.expr =
     let module T = Ast.Term in
     (* Log.debug (fun k->k"(@[conv-t %a@])" T.pp t); *)
+    let loc = T.loc t in
     begin match T.view t with
       | T.App (f, l) ->
         let l = List.map conv_term l in
@@ -398,7 +429,7 @@ module Make(A : ARG) : S = struct
                     let ty = conv_ty ty in
                     E.var_name ctx v.name ty
                   | None ->
-                    errorf"cannot convert unknown identifier@ `%a`" T.pp t
+                    Error.failf ~loc "cannot convert unknown identifier@ `%a`" T.pp t
                 end
             end
         end
@@ -406,7 +437,7 @@ module Make(A : ARG) : S = struct
         let u = conv_term u in
         E.app ctx Cst.not_ u
       | T.Ite (a,b,c) ->
-        let ite = get_builtin_ B.If in
+        let ite = get_builtin_ ~loc B.If in
         let a = conv_term a in
         let b = conv_term b in
         let c = conv_term c in
@@ -416,17 +447,17 @@ module Make(A : ARG) : S = struct
         begin match Hashtbl.find_opt st.named_terms name with
           | Some u -> u
           | None ->
-            errorf "reference to unknown term %S" name
+            Error.failf ~loc "reference to unknown term %S" name
         end
 
       | T.Fun _ ->
-        errorf "todo: conv lambda term `%a`" T.pp t
+        Error.failf ~loc "todo: conv lambda term `%a`" T.pp t
       | T.Let _ ->
-        errorf "todo: conv let term `%a`" T.pp t
+        Error.failf ~loc "todo: conv let term `%a`" T.pp t
 
       | _ ->
         (* TODO *)
-        errorf "todo: conv term `%a`" T.pp t
+        Error.failf ~loc "todo: conv term `%a`" T.pp t
     end
 
   let conv_subst (s:Ast.Subst.t) : K.Subst.t =
@@ -452,53 +483,54 @@ module Make(A : ARG) : S = struct
 
   let conv_clause (c: Ast.clause) : Clause.t =
     Log.debug (fun k->k"conv-clause %a" Ast.Clause.pp c);
-    match c with
+    let loc = c.loc in
+    match c.view with
     | Ast.Clause.Clause lits -> conv_lits lits
     | Ast.Clause.Clause_ref name ->
       begin match Hashtbl.find st.named_clauses name with
         | exception Not_found ->
-          errorf "cannot find reference to clause %S" name
+          Error.failf ~loc "cannot find reference to clause %S" name
         | c -> c
       end
 
   module P = Ast.Proof
 
-  (* check [p], returns its resulting clause.
-     In case of error this returns the empty clause. *)
-  let rec check_subproof (p:P.t) : Clause.t * bool =
+  let register_error (e:Error.t) =
+    st.n_invalid <- 1 + st.n_invalid;
+    Error_list.push st.errors e
+
+  (* check [p], returns its resulting clause. *)
+  let rec check_proof_rec (p:P.t) : Clause.t =
     st.n_steps <- 1 + st.n_steps;
     try
-      let ok, c = check_proof_rec_exn p in
-      Log.debug (fun k->k"(@[check-proof.res@ :ok %b@ :for %a@])" ok P.pp p);
-      if ok then (
-        st.n_valid <- 1 + st.n_valid;
-      ) else (
-        st.n_invalid <- 1 + st.n_invalid;
-      );
-      c, ok
+      let c =
+        Error.guard (Error.wrapf ~loc:(P.loc p) "checking sub-proof") @@ fun () ->
+        check_proof_rec_ p
+      in
+      Log.debug (fun k->k"(@[check-proof.res@ :for %a@])" P.pp p);
+      st.n_valid <- 1 + st.n_valid;
+      c
     with
-    | Error e ->
-      Log.err (fun k->k"proof failed with:@ %s" e);
-      st.n_invalid <- 1 + st.n_invalid;
-      Clause.empty, false
+    | Error.E e as exn ->
+      Log.debug (fun k->k"(@[check-proof.fail@ :for %a@])" P.pp p);
+      register_error e;
+      raise exn
 
-  and check_proof_or_empty_ p =
-    fst @@ check_subproof p
-
-  (* check proof [p], returns the clause it returns *)
-  and check_proof_rec_exn (p: Ast.Proof.t) : bool * Clause.t =
+  (* check [p], returns its clause. *)
+  and check_proof_rec_ (p: Ast.Proof.t) : Clause.t =
     Log.debug (fun k->k"(@[check-proof-rec@ %a@])" P.pp p);
+    let loc = P.loc p in
     begin match P.view p with
       | P.Sorry ->
         (* return `|- false` by default, we do not know what else to return *)
-        false, Clause.empty
+        Error.failf ~loc "met a 'sorry' step"
 
-      | P.Sorry_c c ->
-        false, conv_clause c
+      | P.Sorry_c _c ->
+        Error.failf ~loc "met a 'sorry' step"
 
       | P.Refl t ->
         let t = conv_term t in
-        true, Clause.of_thm (K.Thm.refl ctx t)
+        Clause.of_thm (K.Thm.refl ctx t)
 
       | P.Assert t ->
         Log.warn (fun k->k"TODO: find assert in assumptions");
@@ -507,12 +539,12 @@ module Make(A : ARG) : S = struct
 
         (* assume: [¬t \/ t] *)
         let t = conv_term t in
-        true, Clause.singleton (Lit.make true t)
+        Clause.singleton (Lit.make true t)
 
       | P.Assert_c c ->
         (* FIXME: lookup in problem? *)
         let c = conv_clause c in
-        true, c
+        c
 
       | P.Composite {assumptions; steps} ->
         (* composite proof: check each step *)
@@ -537,16 +569,15 @@ module Make(A : ARG) : S = struct
         List.iter (fun (name,_) -> Hashtbl.remove st.checked name) asms;
 
         begin match r with
-          | None -> errorf "composite proof returns no clause"
-          | Some c -> true, c
+          | None -> Error.failf ~loc"composite proof returns no clause"
+          | Some c -> c
         end
 
       | P.Named name ->
         begin match Hashtbl.find_opt st.checked name with
-          | Some c -> true, c
+          | Some c -> c
           | None ->
-            Log.err (fun k->k"cannot find step with name '%s'" name);
-            false, Clause.empty
+            Error.failf ~loc "cannot find step with name '%s'" name
         end
 
       | P.CC_lemma_imply (ps, t, u) ->
@@ -555,7 +586,7 @@ module Make(A : ARG) : S = struct
         let u = conv_term u in
 
         (* check sub-proofs, and turn them into positive equations *)
-        let ps = List.rev_map (fun p -> snd @@ check_proof_rec_exn p) ps in
+        let ps = List.rev_map check_proof_rec ps in
 
         let hyps =
           ps
@@ -563,7 +594,7 @@ module Make(A : ARG) : S = struct
             (fun c -> match Clause.uniq_pos_lit c with
                | Some lit -> K.Thm.assume ctx (Lit.atom lit)
                | None ->
-                 errorf
+                 Error.failf ~loc
                    "lemma-imply: hypothesis yields %a@ \
                     but must have exactly one positive literal" Clause.pp c)
         in
@@ -578,9 +609,9 @@ module Make(A : ARG) : S = struct
             Log.err (fun k->k"hyps: %a;@ concl: `@[%a@ = %a@]`"
                           Fmt.(Dump.list K.Thm.pp_quoted) hyps
                           E.pp t E.pp u);
-            errorf "failed to prove CC-lemma@ %a" P.pp p
+            Error.failf ~loc "failed to prove CC-lemma@ %a" P.pp p
           | Some thm ->
-            true, Clause.of_thm thm
+            Clause.of_thm thm
         end
 
       | P.CC_lemma c ->
@@ -603,19 +634,19 @@ module Make(A : ARG) : S = struct
             begin match CC.prove_cc_bool ctx ps goal with
               | None ->
                 Log.err (fun k->k"clause: %a" Clause.pp c);
-                errorf "failed to prove@ %a" P.pp p
+                Error.failf ~loc "failed to prove@ %a" P.pp p
               | Some thm ->
-                true, Clause.of_thm thm
+                Clause.of_thm thm
             end
           | _ ->
-            errorf
+            Error.failf ~loc
               "cc-lemma: expected exactly one positive literal@ in %a"
               Fmt.(Dump.list Lit.pp) (Clause.lits_list c)
           end
 
       | P.Paramod1 { rw_with; p=passive } ->
-        let rw_with = check_proof_or_empty_ rw_with in
-        let passive = check_proof_or_empty_ passive in
+        let rw_with = check_proof_rec rw_with in
+        let passive = check_proof_rec passive in
         Log.debug (fun k->k"(@[paramod1@ :rw-with %a@ :p %a@])"
                       Clause.pp rw_with Clause.pp passive);
 
@@ -624,7 +655,8 @@ module Make(A : ARG) : S = struct
           match Clause.lits_list rw_with |> List.map Lit.as_eqn with
           | [Some (a,b)] -> a,b
           | _ ->
-            errorf "expected (@[rw-with@ %a@])@ to be an equation" Clause.pp rw_with
+            Error.failf ~loc
+              "expected (@[rw-with@ %a@])@ to be an equation" Clause.pp rw_with
         in
 
         let candidates =
@@ -644,34 +676,36 @@ module Make(A : ARG) : S = struct
             Log.debug (fun k->k"(@[paramodulation@ :of %a@ :with %a@ :pivot %a@])"
                           Clause.pp passive Clause.pp rw_with E.pp a);
 
-            (* TODO: do the paramodulation *)
-            let res = bool_param_on_ ~lhs:a ~rhs:into ~rw_with passive in
-            true, res
+            let res = bool_param_on_ ~loc ~lhs:a ~rhs:into ~rw_with passive in
+            res
 
           | (a1,_,_) :: (a2,_,_) :: _ ->
-            errorf "ambiguous paramodulation %a by %a:@ \
-                    possible candidates include %a@ and %a"
+            Error.failf ~loc
+              "ambiguous paramodulation %a by %a:@ \
+               possible candidates include %a@ and %a"
               P.pp p Clause.pp rw_with E.pp a1 E.pp a2
 
           | [] ->
-            errorf "no candidate found for paramodulation %a" P.pp p
+            Error.failf ~loc
+              "no candidate found for paramodulation %a" P.pp p
         end
 
       | P.Clause_rw { res; c0; using } ->
         let res = conv_clause res in
-        let c0 = check_proof_or_empty_ c0 in
-        let using = List.map check_proof_or_empty_ using in
+        let c0 = check_proof_rec c0 in
+        let using = List.map check_proof_rec using in
 
         Log.debug (fun k->k"(@[clause-rw@ :res %a@ :c0 %a@ :using %a@])"
                       Clause.pp res Clause.pp c0 (Fmt.Dump.list Clause.pp) using);
 
         if using = [] then (
           if not (Clause.equal c0 res) then (
-            errorf "clause rw failed (empty :using but distinct clauses)@ \
-                   for %a" P.pp p
+            Error.failf ~loc
+              "clause rw failed (empty :using but distinct clauses)@ \
+               for %a" P.pp p
           );
 
-          true, res
+          res
         ) else (
 
           let hyps_using =
@@ -730,12 +764,12 @@ module Make(A : ARG) : S = struct
             | None ->
               (* valid *)
               Log.debug (fun k->k"valid: %a" P.pp p);
-              true, res
+              res
 
             | Some bad ->
-              Log.err (fun k->k"cannot validate %a@ because of literal %a"
-                          P.pp p (Lit.pp_depth ~max_depth:5) bad);
-              false, res
+              Error.failf ~loc
+                "cannot validate %a@ because of literal %a"
+                P.pp p (Lit.pp_depth ~max_depth:5) bad
           end
         )
 
@@ -749,7 +783,7 @@ module Make(A : ARG) : S = struct
           end) in
 
         let c = conv_clause c in
-        let hyps = List.map check_proof_or_empty_ hyps in
+        let hyps = List.map check_proof_rec hyps in
 
         let cstore = D.Clause.create() in
         let checker = D.Checker.create cstore in
@@ -780,62 +814,63 @@ module Make(A : ARG) : S = struct
         let ok = D.Checker.is_valid_drup checker goal in
         Log.debug (fun k->k"(@[RUP-check.res@ :res %B@ :for %a@ :hyps %a@])"
                       ok Clause.pp c (Fmt.Dump.list Clause.pp) hyps);
-        ok, c
+        if ok then c
+        else Error.failf ~loc "RUP step failed"
 
       | P.Res {pivot; p1; p2} ->
         let pivot = conv_term pivot in
-        let c1 = check_proof_or_empty_ p1 in
-        let c2 = check_proof_or_empty_ p2 in
-        true, res_on_ ~pivot c1 c2
+        let c1 = check_proof_rec p1 in
+        let c2 = check_proof_rec p2 in
+        res_on_ ~loc ~pivot c1 c2
 
       | P.Res1 {p1; p2} ->
-        let c1 = check_proof_or_empty_ p1 in
-        let c2 = check_proof_or_empty_ p2 in
+        let c1 = check_proof_rec p1 in
+        let c2 = check_proof_rec p2 in
         begin match Clause.as_singleton c1, Clause.as_singleton c2 with
           | Some lit, _
           | None, Some lit ->
-            true, res_on_ ~pivot:(Lit.atom lit) c1 c2
+            res_on_ ~loc ~pivot:(Lit.atom lit) c1 c2
           | None, None ->
-            errorf
+            Error.failf ~loc
               "res1: expected one of the clauses to be unit@ \
                where c1=`%a`,@ c2=`%a`"
               Clause.pp c1 Clause.pp c2
         end
 
       | P.Subst (subst, p1) ->
-        let ok, p1 = check_proof_rec_exn p1 in
-        if ok then (
-          let subst = conv_subst subst in
-          true, Clause.subst ~recursive:false p1 subst
-        ) else ok, p1
+        let p1 = check_proof_rec p1 in
+        let subst = conv_subst subst in
+        Clause.subst ~recursive:false p1 subst
 
       | P.Hres (init, steps) ->
 
-        let init = check_proof_or_empty_ init in
+        let init = check_proof_rec init in
         let c = List.fold_left check_hres_step_ init steps in
-        true, c
+        c
 
       | P.Bool_c (name, ts) ->
         let ts = List.map conv_term ts in
-        check_bool_c p name ts
+        check_bool_c ~loc p name ts
 
       | P.Bool_true_is_true ->
-        let true_ = E.const ctx (get_builtin_ B.True) [] in
-        true, Clause.singleton @@ Lit.make true true_
+        let true_ = E.const ctx (get_builtin_ ~loc B.True) [] in
+        Clause.singleton @@ Lit.make true true_
 
       | P.Bool_true_neq_false ->
-        let true_ = E.const ctx (get_builtin_ B.True) [] in
-        let false_ = E.const ctx (get_builtin_ B.False) [] in
+        let true_ = E.const ctx (get_builtin_ ~loc B.True) [] in
+        let false_ = E.const ctx (get_builtin_ ~loc B.False) [] in
         let eq = E.app_eq ctx true_ false_ in
-        true, Clause.singleton @@ Lit.make false eq
+        Clause.singleton @@ Lit.make false eq
 
       | P.Ite_true t_ite ->
         (* clause [(cl (- a) (+ (= (ite a b c) b)))] *)
         let t_ite = conv_term t_ite in
         begin match E.unfold_app t_ite with
           | ite, [a;b;_c] when is_builtin_const_ B.If ite ->
-            true, Clause.of_list [Lit.make false a; Lit.make true (E.app_eq ctx t_ite b)]
-          | _ -> errorf "expected a `ite` term,@ got `%a`" E.pp t_ite
+            Clause.of_list [Lit.make false a; Lit.make true (E.app_eq ctx t_ite b)]
+          | _ ->
+            Error.failf ~loc
+              "expected a `ite` term,@ got `%a`" E.pp t_ite
         end
 
       | P.Ite_false t_ite ->
@@ -848,8 +883,10 @@ module Make(A : ARG) : S = struct
                 Lit.make false (E.app ctx Cst.not_ a);
                 Lit.make true (E.app_eq ctx t_ite c)
               ] in
-            true, c
-          | _ -> errorf "expected a `ite` term,@ got `%a`" E.pp t_ite
+            c
+          | _ ->
+            Error.failf ~loc
+              "expected a `ite` term,@ got `%a`" E.pp t_ite
         end
 
       | P.With (bs, p) ->
@@ -861,7 +898,7 @@ module Make(A : ARG) : S = struct
           bs;
         CCFun.finally1
           ~h:(fun () -> List.iter (fun (n,_) -> Hashtbl.remove st.named_terms n) bs)
-          check_proof_rec_exn p
+          check_proof_rec p
 
       | P.DT_isa_split (_, _)
       | P.DT_isa_disj (_, _, _)
@@ -869,11 +906,10 @@ module Make(A : ARG) : S = struct
       | P.Bool_eq (_, _)
       | P.LRA _
         ->
-        Log.warn (fun k->k"unimplemented: checking %a" P.pp p);
-        false, Clause.empty (* TODO *)
+        Error.failf ~loc "unimplemented: checking %a" P.pp p
     end
 
-  and check_bool_c p name (ts:K.expr list) : bool * Clause.t =
+  and check_bool_c ~loc p name (ts:K.expr list) : Clause.t =
     let module B = Quip_core.Builtin in
 
     let get1 = function [t] -> Some t | _ -> None in
@@ -887,17 +923,16 @@ module Make(A : ARG) : S = struct
           let open CCOpt.Infix in
           match
             let* and_ = get1 ts in
-            let* args = unfold_builtin B.And and_ in
+            let* args = unfold_builtin ~loc B.And and_ in
             let c =
               Clause.of_list
                 (Lit.make true and_ :: List.map (Lit.make false) args)
             in
             Some c
           with
-          | Some c -> true, c
+          | Some c -> c
           | None ->
-            Log.err (fun k->k"cannot check %a" P.pp p);
-            false, Clause.empty
+            Error.failf ~loc "cannot check %a" P.pp p
         end
 
       | P.And_e ->
@@ -907,18 +942,17 @@ module Make(A : ARG) : S = struct
           let open CCOpt.Infix in
           match
             let* and_, u = get2 ts in
-            let* args = unfold_builtin B.And and_ in
+            let* args = unfold_builtin ~loc B.And and_ in
             let ok = CCList.mem ~eq:E.equal u args in
             let c =
               if ok then Clause.of_list [Lit.make false and_; Lit.make true u]
-              else Clause.empty
+              else Error.failf ~loc "%a does not occur in %a" E.pp u Fmt.(Dump.list E.pp) args
             in
-            Some (ok, c)
+            Some c
           with
-          | Some tup -> tup
+          | Some c -> c
           | None ->
-            Log.err (fun k->k"cannot check %a" P.pp p);
-            false, Clause.empty
+            Error.failf ~loc "Cannot check %a" P.pp p
         end
 
       | P.Or_i ->
@@ -928,18 +962,17 @@ module Make(A : ARG) : S = struct
           let open CCOpt.Infix in
           match
             let* or_, u = get2 ts in
-            let* args = unfold_builtin B.Or or_ in
+            let* args = unfold_builtin ~loc B.Or or_ in
             let ok = CCList.mem ~eq:E.equal u args in
             let c =
               if ok then Clause.of_list [Lit.make false u; Lit.make true or_]
-              else Clause.empty
+              else Error.failf ~loc "%a does not occur in %a" E.pp u Fmt.(Dump.list E.pp) args
             in
-            Some (ok, c)
+            Some c
           with
-          | Some tup -> tup
+          | Some c -> c
           | None ->
-            Log.err (fun k->k"cannot check %a" P.pp p);
-            false, Clause.empty
+            Error.failf ~loc "Cannot check %a" P.pp p
         end
 
       | P.Or_e ->
@@ -949,17 +982,16 @@ module Make(A : ARG) : S = struct
           let open CCOpt.Infix in
           match
             let* or_ = get1 ts in
-            let* args = unfold_builtin B.Or or_ in
+            let* args = unfold_builtin ~loc B.Or or_ in
             let c =
               Clause.of_list
                 (Lit.make false or_ :: List.map (Lit.make true) args)
             in
             Some c
           with
-          | Some c -> true, c
+          | Some c -> c
           | None ->
-            Log.err (fun k->k"cannot check %a" P.pp p);
-            false, Clause.empty
+            Error.failf ~loc "Cannot check %a" P.pp p
         end
 
       | P.Not_i
@@ -970,11 +1002,11 @@ module Make(A : ARG) : S = struct
       | P.Eq_e
       | P.Xor_i
       | P.Xor_e ->
-        false, Clause.empty (* TODO *)
+        Error.failf ~loc "TODO: check bool-c@ %a" P.pp p
     end
 
   (* do resolution between [c1] and [c2] *)
-  and res_on_ ~pivot c1 c2 : Clause.t =
+  and res_on_ ~loc ~pivot c1 c2 : Clause.t =
     Log.debug (fun k->k "(@[resolve@ :c1 %a@ :c2 %a@ :pivot %a@])"
                   Clause.pp c1 Clause.pp c2 E.pp pivot);
     (* find the polarity of [pivot] in [c1] *)
@@ -984,16 +1016,18 @@ module Make(A : ARG) : S = struct
       if Clause.mem lit' c2 then (
         Clause.(union (remove lit c1) (remove lit' c2))
       ) else (
-        errorf "cannot resolve: pivot `%a`@ does not occur in `%a`"
+        Error.failf ~loc
+          "cannot resolve: pivot `%a`@ does not occur in `%a`"
           E.pp pivot Clause.pp c2
       )
 
     | None ->
-      errorf "cannot resolve %a@ on pivot `%a`" Clause.pp c1 E.pp pivot
+      Error.failf ~loc
+        "cannot resolve %a@ on pivot `%a`" Clause.pp c1 E.pp pivot
 
   (* do bool paramodulation between [c1] and [c2],
        where [c2] must contain [lhs = rhs] and [c1] must contain [lhs] *)
-  and bool_param_on_ ~lhs ~rhs c1 ~rw_with:c2 : Clause.t =
+  and bool_param_on_ ~loc ~lhs ~rhs c1 ~rw_with:c2 : Clause.t =
     Log.debug (fun k->k "(@[bool-param@ :c1 %a@ :c2 %a@ :lhs `%a`@ :rhs `%a`@])"
                   Clause.pp c1 Clause.pp c2 E.pp lhs E.pp rhs);
     (* find if [c2] contains [lhs=rhs] or [rhs=lhs] *)
@@ -1012,12 +1046,13 @@ module Make(A : ARG) : S = struct
             | _ -> None))
     with
     | None, _ ->
-      errorf
+      Error.failf ~loc
         "cannot perform bool paramod@ in `%a`:@ it does not contain `%a`"
         Clause.pp c1 K.Expr.pp lhs
 
     | _, None ->
-      errorf "cannot do unit-paramod on %a" Clause.pp c2
+      Error.failf ~loc
+        "cannot do unit-paramod on %a" Clause.pp c2
 
     | Some lit_lhs, Some lit_eqn ->
       assert (Lit.sign lit_eqn);
@@ -1031,43 +1066,46 @@ module Make(A : ARG) : S = struct
       )
 
   and check_hres_step_ (c1: Clause.t) (step:_ P.hres_step) : Clause.t =
-    begin match step with
+    let loc = step.loc in
+    begin match step.view with
       | P.R {pivot; p} ->
         let pivot = conv_term pivot in
-        let c2 = check_proof_or_empty_ p in
-        res_on_ ~pivot c1 c2
+        let c2 = check_proof_rec p in
+        res_on_ ~loc ~pivot c1 c2
 
       | P.R1 p ->
-        let c2 = check_proof_or_empty_ p in
+        let c2 = check_proof_rec p in
         let pivot = match Clause.as_singleton c2 with
           | None ->
-            errorf "r1: clause `%a`@ does not have a unique positive literal"
+            Error.failf ~loc
+              "r1: clause `%a`@ does not have a unique positive literal"
               Clause.pp c2
           | Some t -> Lit.atom t
         in
-        res_on_ ~pivot c1 c2
+        res_on_ ~loc ~pivot c1 c2
 
       | P.P { lhs; rhs; p } ->
         let lhs = conv_term lhs in
         let rhs = conv_term rhs in
-        let c2 = check_proof_or_empty_ p in
-        bool_param_on_ ~lhs ~rhs c1 ~rw_with:c2
+        let c2 = check_proof_rec p in
+        bool_param_on_ ~loc ~lhs ~rhs c1 ~rw_with:c2
 
       | P.P1 p ->
-        let c2 = check_proof_or_empty_ p in
-        let fail() = errorf "cannot do p1 on %a" Clause.pp c2 in
+        let c2 = check_proof_rec p in
+        let fail() = Error.failf ~loc "cannot do p1 on %a" Clause.pp c2 in
         match Clause.uniq_pos_lit c2 with
         | Some lit ->
           assert (Lit.sign lit);
           begin match E.unfold_eq (Lit.atom lit) with
-            | Some (lhs, rhs) -> bool_param_on_ ~lhs ~rhs c1 ~rw_with:c2
+            | Some (lhs, rhs) -> bool_param_on_ ~loc ~lhs ~rhs c1 ~rw_with:c2
             | None -> fail()
           end
         | None -> fail()
     end
 
   and check_composite_step_ (step: _ Ast.Proof.composite_step) : Clause.t option =
-   begin match step with
+    let loc = step.loc in
+    begin match step.view with
     | P.S_define_t (name, u) ->
       let u = conv_term u in
       Hashtbl.add st.named_terms name u;
@@ -1082,30 +1120,26 @@ module Make(A : ARG) : S = struct
 
       Log.info (fun k->k"check step '%s'" name);
 
-      let c, ok = check_subproof proof in
-      if not ok then st.bad <- name :: st.bad;
-      Log.debug (fun k->k"step '%s'@ yields %a" name Clause.pp c);
+      begin
+        try
+          let c = check_proof_rec proof in
+          Log.debug (fun k->k"step '%s'@ yields %a" name Clause.pp c);
+
+          if not @@ Clause.subset c expected_c then (
+            Error.failf ~loc
+              "step '%s'@ should yield %a@ but proof returns %a"
+              name Clause.pp expected_c Clause.pp c
+          );
+        with Error.E e ->
+          st.bad <- name :: st.bad;
+          register_error e
+      end;
 
       (* named clause goes out of scope *)
       Hashtbl.remove st.named_clauses name;
+      Hashtbl.add st.checked name expected_c;
 
-      let c =
-        if Clause.subset c expected_c then (
-          (* [c subset expected_c] is valid, we just use [expected_c]
-             in the rest of the proof to avoid drift *)
-          expected_c
-        ) else (
-          Log.err (fun k->k"step '%s'@ should yield %a@ but proof returns %a"
-                      name Clause.pp expected_c Clause.pp c);
-          st.n_invalid <- 1 + st.n_invalid;
-          (* use the expected clause instead *)
-          expected_c
-        )
-      in
-
-      Hashtbl.add st.checked name c;
-
-      Some c
+      Some expected_c
 
     | P.S_declare_ty_const {name; arity} ->
       let c = E.new_ty_const ctx name arity in
@@ -1133,17 +1167,23 @@ module Make(A : ARG) : S = struct
 
   let check_proof p =
     Log.debug (fun k->k"checking proof");
-    let _c = check_proof_or_empty_ p in
-    (* TODO: should it return the empty clause? *)
+    begin
+      try
+        (* TODO: should it return the empty clause? *)
+        ignore (check_proof_rec p: Clause.t);
+      with Error.E e ->
+        register_error e
+    end;
     let ok = st.n_invalid=0 in
     let bad = List.sort String.compare st.bad in
-    ok, bad, {n_invalid=st.n_invalid; n_valid=st.n_valid; n_steps=st.n_steps}
+    let errors = Error_list.get_l st.errors in
+    ok, bad, errors, {n_invalid=st.n_invalid; n_valid=st.n_valid; n_steps=st.n_steps}
 end
 
 let create ctx pb : t =
   let module M = Make(struct let ctx=ctx let problem=pb end) in
   (module M)
 
-let check_proof (self: t) (p: Ast.Proof.t) : bool * _ * stats =
+let check_proof (self: t) (p: Ast.Proof.t) : bool * _ * _ * stats =
   let (module Self) = self in
   Self.check_proof p

@@ -4,6 +4,7 @@ open Common
 
 module Logger = Logger
 module Loc = Loc
+module Error = Error
 
 (** Setup a logger at given level *)
 let setup_log lvl : unit =

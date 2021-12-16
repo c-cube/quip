@@ -4,7 +4,7 @@
     A location is a range between two positions in a string (a source file).
 *)
 
-open Common
+module Fmt = CCFormat
 
 module Input : sig
   type t

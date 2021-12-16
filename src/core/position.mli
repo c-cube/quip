@@ -4,7 +4,7 @@
     A position in a string. Line and column are 1-based, so that compatibility
     with LSP is easier. *)
 
-open Common
+module Fmt = CCFormat
 
 type t = {
   line: int;

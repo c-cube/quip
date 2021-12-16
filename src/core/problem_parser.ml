@@ -5,6 +5,10 @@ type parsed_pb = env
 
 module Log = (val Logs.src_log (Logs.Src.create ~doc:"Problem parser for Quip" "quip.parse-pb"))
 
+exception E of string
+let error e = raise (E e)
+let errorf fmt = Fmt.kasprintf error fmt
+
 module Mk_smtlib(Env : Env.S) = struct
   module SA = Smtlib_utils.V_2_6.Ast
   module E = K.Expr
@@ -14,7 +18,7 @@ module Mk_smtlib(Env : Env.S) = struct
     Log.debug (fun k->k"(@[conv-ty@ %a@])" SA.pp_ty ty);
     let rec loop ty = match ty with
       | SA.Ty_bool -> E.bool ctx
-      | SA.Ty_real -> errorf "not supported: type Real"
+      | SA.Ty_real -> Error.fail "not supported: type Real"
       | SA.Ty_arrow (args, ret) ->
         let args = List.map loop args in
         let ret = loop ret in
@@ -24,7 +28,7 @@ module Mk_smtlib(Env : Env.S) = struct
         E.var ctx v
       | SA.Ty_app (s, l) ->
         begin match Env.find_ty_const_by_name s with
-          | None -> errorf "unknown type constructor '%s'" s
+          | None -> Error.failf "unknown type constructor '%s'" s
           | Some c ->
             E.const ctx c (List.map loop l)
         end
@@ -201,11 +205,11 @@ module Smtlib = struct
 
   let parse_file ctx file =
     try Ok (parse_file_exn ctx file)
-    with Error s -> Error s
+    with E s -> Error s
 
   let parse_string ctx s =
     try Ok (parse_ ctx (`Str s))
-    with Error s -> Error s
+    with E s -> Error s
 end
 
 type syn =
@@ -221,9 +225,9 @@ let parse_file ctx filename : _ result =
   | ".smt2" ->
     Smtlib.parse_file ctx filename
   | ext ->
-    errorf "unknown problem extension '%s'" ext
+    Error.failf "unknown problem extension '%s'" ext
 
 let parse_file_exn ctx filename =
   match parse_file ctx filename with
   | Ok x -> x
-  | Error e -> error e
+  | Error e -> Error.fail e

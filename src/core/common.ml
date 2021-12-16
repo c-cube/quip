@@ -3,12 +3,10 @@ module Fmt = CCFormat
 module K = Trustee_core.Kernel
 module Str_map = CCMap.Make(String)
 
-exception Error of string
-let error msg = raise (Error msg)
-let errorf fmt = Fmt.kasprintf (fun s -> error s) fmt
+module CCOpt = CCOpt
 
-let () = Printexc.register_printer
-    (function
-      | Error s -> Some s
-      | _ -> None)
+module Loc = Loc
+module Error = Error
 
+let pp_l ppx out l =
+  Fmt.(list ~sep:(return "@ ") ppx) out l

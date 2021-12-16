@@ -38,7 +38,7 @@ end = struct
     T.rw ~rule t
 
   let norm_clause st (c:Ast.Clause.t) : T.t array =
-    match c with
+    match c.view with
     | Ast.Clause.Clause_ref n ->
       (try Hashtbl.find st.clauses n
        with Not_found ->
@@ -106,7 +106,7 @@ end = struct
     name
 
   and pp_step (state:state) (self:_ composite_step) : unit =
-    match self with
+    match self.view with
     | S_define_t (name,t) ->
       Hashtbl.replace state.terms name t
     | S_declare_ty_const _ -> ()
@@ -196,8 +196,8 @@ let () =
     begin
       try main ~out:!out proof
       with
-      | Error msg ->
-        Fmt.eprintf "@{<Red>Error@}: %s@." msg; exit 3
+      | Error.E e ->
+        Fmt.eprintf "%a@." Error.pp e; exit 3
       | e ->
         let bt = Printexc.get_backtrace() in
         let msg = Printexc.to_string e in

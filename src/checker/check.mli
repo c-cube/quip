@@ -15,4 +15,4 @@ type stats = {
 
 type bad = string
 
-val check_proof : t -> Quip_core.Ast.Proof.t -> bool * bad list * stats
+val check_proof : t -> Quip_core.Ast.Proof.t -> bool * bad list * Error.t list * stats

@@ -1,5 +1,5 @@
 
-open Common
+module Fmt = CCFormat
 module P = Position
 
 (* line index *)
@@ -101,8 +101,12 @@ let tr_loc (self:t) : Pp_loc.loc =
   tr_position ~left:true self self.start,
   tr_position ~left:false self self.stop
 
+let none = {file="<none>"; input=Input.string "";
+            start={line=1;col=1}; stop={line=1;col=1}}
+
 let pp_compact out (self:t) =
-  if self.start.line=self.stop.line then (
+  if self == none then ()
+  else if self.start.line=self.stop.line then (
     Format.fprintf out "in file '%s', line %d columns %d..%d"
       self.file self.start.line self.start.col self.stop.col
   ) else (
@@ -111,10 +115,15 @@ let pp_compact out (self:t) =
   )
 
 let pp out (self:t) : unit =
-  let input = Input.to_pp_loc_input self.input in
-  Format.fprintf out "@[<v>%a@ %a@]"
-    pp_compact self
-    (Pp_loc.pp ~max_lines:5 ~input) [tr_loc self]
+  if self == none then ()
+  else (
+    let input = Input.to_pp_loc_input self.input in
+    Format.fprintf out "@[<v>%a@ %a@]"
+      pp_compact self
+      (Pp_loc.pp ~max_lines:5 ~input) [tr_loc self]
+  )
+
+let show = Fmt.to_string pp
 
 let pp_l out (l:t list) : unit =
   if l=[] then ()
@@ -144,24 +153,9 @@ let union_l = function
   | [l] -> Some l
   | l1 :: tl -> Some (List.fold_left union l1 tl)
 
-let pp out (self:t) : unit =
-  if self.start.P.line = self.stop.P.line then (
-    Fmt.fprintf out "'%s': %d:%d-%d"
-      self.file self.start.P.line self.start.P.col self.stop.P.col
-  ) else (
-    Fmt.fprintf out "'%s': %d:%d-%d:%d"
-      self.file self.start.P.line self.start.P.col
-      self.stop.P.line self.stop.P.col
-  )
-
-let show = Fmt.to_string pp
-
 let pp_opt out = function
   | None -> ()
   | Some pos -> Fmt.fprintf out "At %a" pp pos
-
-let none = {file="<none>"; input=Input.string "";
-            start={line=1;col=1}; stop={line=1;col=1}}
 
 let mk ~input ~filename start_line start_column stop_line stop_column =
   let start = P.make ~line:start_line ~col:start_column in

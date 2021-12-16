@@ -28,13 +28,14 @@ let main ~quiet ~problem proof : 'a =
   let checker = Quip_check.Check.create ctx env in
 
   Fmt.printf "checking proof…@.";
-  let proof_valid, bad_steps, stats = Quip_check.Check.check_proof checker proof in
+  let proof_valid, bad_steps, errors, stats = Quip_check.Check.check_proof checker proof in
   Fmt.printf "; @[<h>%a@]@." Quip_check.Check.pp_stats stats;
   if proof_valid then (
     Fmt.printf "@{<Green>OK@}@.";
   ) else (
     Fmt.printf "@{<Red>FAIL@}@.";
     Fmt.printf "; bad steps: %s@." (String.concat ", " bad_steps);
+    List.iter (Fmt.printf "%a@." Error.pp) errors;
   );
   Fmt.printf "; done in %.3fs@." (Chrono.elapsed chrono);
   exit (if proof_valid then 0 else 1)
@@ -66,8 +67,8 @@ let () =
     begin
       try main ~quiet:!quiet ~problem:!problem proof
       with
-      | Error msg ->
-        Fmt.eprintf "@{<Red>Error@}: %s@." msg; exit 3
+      | Error.E e ->
+        Fmt.eprintf "%a@." Error.pp e; exit 3
       | e ->
         let bt = Printexc.get_backtrace() in
         let msg = Printexc.to_string e in

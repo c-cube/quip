@@ -44,22 +44,22 @@ module Term : sig
   [@@deriving show]
 
   val view : t -> (t, Ty.t) view
-  val loc : t -> Loc.t option
+  val loc : t -> Loc.t
   val map_shallow : (t -> t) -> t -> t
 
   (** Rewrite a term with the given function *)
   val rw : rule:(t -> t option) -> t -> t
 
-  val ref : loc:Loc.t option -> string -> t
-  val var : loc:Loc.t option -> Ty.t option Var.t -> t
-  val eq : loc:Loc.t option -> t -> t -> t
-  val not: loc:Loc.t option -> t -> t
-  val app_var : loc:Loc.t option -> Ty.t option Var.t -> t list -> t
-  val app_name : loc:Loc.t option -> Name.t -> t list -> t
-  val const : loc:Loc.t option -> Name.t -> t
-  val let_ : loc:Loc.t option -> (unit Var.t * t) list -> t -> t
-  val fun_ : loc:Loc.t option -> Ty.t Var.t -> t -> t
-  val ite : loc:Loc.t option -> t -> t -> t -> t
+  val ref : loc:Loc.t -> string -> t
+  val var : loc:Loc.t -> Ty.t option Var.t -> t
+  val eq : loc:Loc.t -> t -> t -> t
+  val not: loc:Loc.t -> t -> t
+  val app_var : loc:Loc.t -> Ty.t option Var.t -> t list -> t
+  val app_name : loc:Loc.t -> Name.t -> t list -> t
+  val const : loc:Loc.t -> Name.t -> t
+  val let_ : loc:Loc.t -> (unit Var.t * t) list -> t -> t
+  val fun_ : loc:Loc.t -> Ty.t Var.t -> t -> t
+  val ite : loc:Loc.t -> t -> t -> t -> t
 end
 
 type term = Term.t

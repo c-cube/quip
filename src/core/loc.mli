@@ -6,29 +6,36 @@
 
 open Common
 
+module Input : sig
+  type t
+  val string : string -> t
+  val file : string -> t
+end
+
 type t = {
   file: string;
   start: Position.t;
-  end_: Position.t;
+  stop: Position.t;
+  input: Input.t;
 } [@@deriving show]
 
-val mk : string -> int -> int -> int -> int -> t
-val mk_pair : string -> int*int -> int*int -> t
+val mk : input:Input.t -> filename:string -> int -> int -> int -> int -> t
+val mk_pair : input:Input.t -> filename:string -> int*int -> int*int -> t
 
+val of_lexbuf : input:Input.t -> Lexing.lexbuf -> t
+
+val pp_compact : t Fmt.printer
 val pp_opt : t option Fmt.printer
 val none : t
 
-val single : ?file:string -> Position.t -> t
-val merge: t -> t -> t
+val union : t -> t -> t
+val union_l : t list -> t option
+
 val contains : t -> Position.t -> bool
 
-module Infix : sig
-  val (++) : t -> t -> t
-  (** Short for merge *)
-end
-include module type of Infix
+val pp_l : t list Fmt.printer
+(** Print list of locations *)
 
 (**/**)
 val set_file : Lexing.lexbuf -> string -> unit
-val of_lexbuf : Lexing.lexbuf -> t
 (**/**)

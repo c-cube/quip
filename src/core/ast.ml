@@ -47,7 +47,7 @@ module Term = struct
 
   type t = {
     view: (t, Ty.t) view;
-    loc: Loc.t option;
+    loc: Loc.t;
   }
 
   let[@inline] mk_ ~loc view : t = {loc; view}

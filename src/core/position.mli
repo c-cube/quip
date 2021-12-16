@@ -14,6 +14,8 @@ type t = {
 val none : t
 val make : line:int -> col:int -> t
 
-val leq : t -> t -> bool
+val (<=) : t -> t -> bool
+val (<) : t -> t -> bool
+val (=) : t -> t -> bool
 val min : t -> t -> t
 val max : t -> t -> t

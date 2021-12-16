@@ -7,7 +7,10 @@ module Log = (val Logs.src_log (Logs.Src.create "quip.main"))
 let main ~quiet ~problem proof : 'a =
   let chrono = Chrono.start() in
   Log.info (fun k->k"process proof '%s' with problem %a" proof (Fmt.opt Fmt.string_quoted) problem);
-  let proof = with_file_in proof (Parser.Proof.parse_chan ~filename:proof) in
+  let proof =
+    let content = with_file_in proof CCIO.read_all in
+    Parser.Proof.parse_string ~filename:proof content
+  in
   if not quiet then (
     Log.info (fun k->k"parsed proof (in %.3fs)" @@ Chrono.elapsed chrono);
     Log.debug (fun k->k"parsed proof:@ %a" Ast.Proof.pp proof);

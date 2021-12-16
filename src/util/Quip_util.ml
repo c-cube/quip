@@ -3,6 +3,7 @@ open Quip_core
 open Common
 
 module Logger = Logger
+module Loc = Loc
 
 (** Setup a logger at given level *)
 let setup_log lvl : unit =

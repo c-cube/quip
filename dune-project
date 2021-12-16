@@ -13,4 +13,5 @@
     (ounit2 :with-test)
     logs
     (ocaml (>= "4.08"))
+    pp_loc
     ))

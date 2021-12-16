@@ -3,6 +3,6 @@
   (name quip_core)
   (public_name quip.core)
   (synopsis "Core AST and parser for Quip")
-  (libraries smtlib-utils trustee.core containers logs
+  (libraries smtlib-utils trustee.core containers logs pp_loc
              ppx_deriving.runtime)
   (preprocess (pps ppx_deriving.std)))

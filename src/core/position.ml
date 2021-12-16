@@ -11,6 +11,8 @@ let show = Fmt.to_string pp
 
 let make ~line ~col : t = { col; line}
 let none = {line=1; col=1}
-let leq a b = a.line < b.line || (a.line=b.line && a.col <= b.col)
-let min a b = if leq a b then a else b
-let max a b = if leq a b then b else a
+let (<=) a b = a.line < b.line || (a.line=b.line && a.col <= b.col)
+let (<) a b = a.line < b.line || (a.line=b.line && a.col < b.col)
+let (=) a b = a.line=b.line && a.col = b.col
+let min a b = if a <= b then a else b
+let max a b = if a <= b then b else a

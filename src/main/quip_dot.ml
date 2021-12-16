@@ -157,7 +157,10 @@ end
 let main ~out proof : 'a =
   let out = if out="" then "proof.dot" else out in
 
-  let proof = with_file_in proof (Parser.Proof.parse_chan ~filename:proof) in
+  let proof =
+    let content = with_file_in proof CCIO.read_all in
+    Parser.Proof.parse_string ~filename:proof content
+  in
   Log.info (fun k->k"parsed proof");
   Log.debug (fun k->k"parsed proof:@ %a" Ast.Proof.pp proof);
 

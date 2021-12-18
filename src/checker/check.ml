@@ -326,7 +326,6 @@ module Make(A : ARG) : S = struct
     type t
     val create : ?max:int -> unit -> t
     val push : t -> Error.t -> unit
-    val n_errors : t -> int
     val get_l : t -> Error.t list
   end = struct
     type t = {
@@ -344,7 +343,6 @@ module Make(A : ARG) : S = struct
         self.errs <- e :: self.errs
       )
 
-    let n_errors self = self.n
     let get_l self = List.rev self.errs
   end
 
@@ -805,8 +803,14 @@ module Make(A : ARG) : S = struct
         let ok = D.Checker.is_valid_drup checker goal in
         Log.debug (fun k->k"(@[RUP-check.res@ :res %B@ :for %a@ :hyps %a@])"
                       ok Clause.pp c (Fmt.Dump.list Clause.pp) hyps);
-        if ok then c
-        else Error.failf ~loc "RUP step failed"
+        if ok then c else (
+          Error.failf ~loc
+            "RUP step failed@ \
+             @[<v2>expected result clause is:@ %a@]@ \
+             @[<v2>clauses are:@ %a@]"
+            Clause.pp c
+            (Fmt.list Clause.pp) hyps
+        )
 
       | P.Res {pivot; p1; p2} ->
         let pivot = conv_term pivot in
@@ -985,10 +989,34 @@ module Make(A : ARG) : S = struct
             Error.failf ~loc "Cannot check %a" P.pp p
         end
 
+
+      | P.Imp_e ->
+        (* [¬(=> a1…an b) \/ ¬a1 \/ … ¬an \/ b] *)
+
+        begin
+          let open CCOpt.Infix in
+          match
+            let* imp = get1 ts in
+            let* args = unfold_builtin ~loc B.Imply imp in
+            let args, ret = match args with
+              | [] -> Error.failf ~loc "empty implication"
+              | r :: l -> l, r
+            in
+            let c =
+              Clause.of_list
+                (Lit.make false imp :: Lit.make true ret :: List.map (Lit.make false) args)
+            in
+            Some c
+          with
+          | Some c -> c
+          | None ->
+            Error.failf ~loc "Cannot check %a" P.pp p
+        end
+
+
+      | P.Imp_i
       | P.Not_i
       | P.Not_e
-      | P.Imp_i
-      | P.Imp_e
       | P.Eq_i
       | P.Eq_e
       | P.Xor_i

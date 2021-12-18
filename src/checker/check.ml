@@ -502,19 +502,10 @@ module Make(A : ARG) : S = struct
   (* check [p], returns its resulting clause. *)
   let rec check_proof_rec (p:P.t) : Clause.t =
     st.n_steps <- 1 + st.n_steps;
-    try
-      let c =
-        Error.guard (Error.wrapf ~loc:(P.loc p) "checking sub-proof") @@ fun () ->
-        check_proof_rec_ p
-      in
-      Log.debug (fun k->k"(@[check-proof.res@ :for %a@])" P.pp p);
-      st.n_valid <- 1 + st.n_valid;
-      c
-    with
-    | Error.E e as exn ->
-      Log.debug (fun k->k"(@[check-proof.fail@ :for %a@])" P.pp p);
-      register_error e;
-      raise exn
+    let c = check_proof_rec_ p in
+    Log.debug (fun k->k"(@[check-proof.res@ :for %a@])" P.pp p);
+    st.n_valid <- 1 + st.n_valid;
+    c
 
   (* check [p], returns its clause. *)
   and check_proof_rec_ (p: Ast.Proof.t) : Clause.t =
@@ -1120,8 +1111,16 @@ module Make(A : ARG) : S = struct
 
       Log.info (fun k->k"check step '%s'" name);
 
+      (* check proof, catching errors. We know the expected result
+         of this step. *)
       begin
         try
+          let@@ () =
+            Error.guard
+              (Error.wrapf ~loc "checking step `%s`@ expected result: %a"
+                 name Clause.pp expected_c)
+          in
+
           let c = check_proof_rec proof in
           Log.debug (fun k->k"step '%s'@ yields %a" name Clause.pp c);
 
@@ -1162,13 +1161,13 @@ module Make(A : ARG) : S = struct
       let th, c = K.Thm.new_basic_definition ctx defe in
       Problem.def_const name c th;
       Some (Clause.of_thm th)
-
-   end
+    end
 
   let check_proof p =
     Log.debug (fun k->k"checking proof");
     begin
       try
+        let@@ () = Error.guard (Error.wrap "Checking toplevel proof") in
         (* TODO: should it return the empty clause? *)
         ignore (check_proof_rec p: Clause.t);
       with Error.E e ->

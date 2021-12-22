@@ -52,12 +52,18 @@ module Make(A : ARG) : S = struct
     | _ -> None
 
   (* always normalize equations so that the order in which they were
-     input does not matter *)
-  let normalize_expr_ e =
-    match E.unfold_eq e with
-    | Some (a,b) when E.compare a b < 0 ->
-      E.app_eq ctx b a
-    | _ -> e
+     input does not matter. Also normalize under [not] because we might open it. *)
+  let rec normalize_expr_ e =
+    match unfold_not_ e with
+    | Some u ->
+      E.app ctx Cst.not_ (normalize_expr_ u)
+    | None ->
+      match E.unfold_eq e with
+      | Some (a,b) ->
+        let a = normalize_expr_ a in
+        let b = normalize_expr_ b in
+        if E.compare a b < 0 then E.app_eq ctx b a else E.app_eq ctx a b
+      | _ -> e
 
   [@@@ocaml.warning "-32"]
 

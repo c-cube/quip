@@ -682,7 +682,11 @@ module Make(A : ARG) : S = struct
 
           | [] ->
             Error.failf ~loc
-              "no candidate found for paramodulation %a" P.pp p
+              "@[<2>no candidate found for paramodulation@ \
+               @[<2>passive clause: %a@]@ \
+               @[<2>rewrite with: %a@]@ \
+               @[<2>step: %a@]@]"
+              Clause.pp passive Clause.pp rw_with P.pp p
         end
 
       | P.Clause_rw { res; c0; using } ->
@@ -1019,12 +1023,30 @@ module Make(A : ARG) : S = struct
             Error.failf ~loc "Cannot check %a" P.pp p
         end
 
+      | P.Eq_e ->
+        (* [¬ (a=b) \/ ¬a \/ b] *)
+        begin
+          let open CCOpt.Infix in
+          match
+            let* eq, t = get2 ts in
+            let* a, b = E.unfold_eq eq in
+            if E.equal t a then
+              Some (Clause.of_list [Lit.make false eq; Lit.make false t; Lit.make true b])
+            else if E.equal t b then
+              Some (Clause.of_list [Lit.make false eq; Lit.make false t; Lit.make true a])
+            else
+              None
+          with
+          | Some c -> c
+          | None ->
+            Error.failf ~loc "Cannot check %a" P.pp p
+        end
+
 
       | P.Imp_i
       | P.Not_i
       | P.Not_e
       | P.Eq_i
-      | P.Eq_e
       | P.Xor_i
       | P.Xor_e ->
         Error.failf ~loc "TODO: check bool-c@ %a" P.pp p

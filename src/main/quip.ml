@@ -3,6 +3,8 @@
 
 module Log = (val Logs.src_log (Logs.Src.create "quip.main"))
 
+let hrule = String.make 60 '='
+
 (* check proof for problem, then exits *)
 let main ~quiet ~problem proof : 'a =
   let chrono = Chrono.start() in
@@ -35,7 +37,7 @@ let main ~quiet ~problem proof : 'a =
   ) else (
     Fmt.printf "@{<Red>FAIL@}@.";
     Fmt.printf "; bad steps: %s@." (String.concat ", " bad_steps);
-    List.iter (Fmt.printf "%a@." Error.pp) errors;
+    List.iter (Fmt.printf "%s@.%a@." hrule Error.pp) errors;
   );
   Fmt.printf "; done in %.3fs@." (Chrono.elapsed chrono);
   exit (if proof_valid then 0 else 1)

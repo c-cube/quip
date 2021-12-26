@@ -580,64 +580,55 @@ module Make(A : ARG) : S = struct
         let t = conv_term t in
         let u = conv_term u in
 
-        (* check sub-proofs, and turn them into positive equations *)
+        (* check sub-proofs *)
         let ps = List.rev_map check_proof_rec ps in
 
-        let hyps =
+        let hyp_lits =
           ps
           |> List.rev_map
             (fun c -> match Clause.uniq_pos_lit c with
-               | Some lit -> K.Thm.assume ctx (Lit.atom lit)
+               | Some lit -> lit
                | None ->
                  Error.failf ~loc
                    "lemma-imply: hypothesis yields %a@ \
                     but must have exactly one positive literal" Clause.pp c)
         in
 
-        (* FIXME:
-           - the CC lemma might ignore some hyps, so add these back
-           - then do resolution with [ps], which might be Horn clauses,
-              not just equalities *)
+        (* [hyps /\ t ≠ u] *)
+        let neg_lits = Lit.make false (E.app_eq ctx t u) :: hyp_lits in
 
-        begin match CC.prove_cc_eqn ctx hyps t u with
-          | None ->
-            Log.err (fun k->k"hyps: %a;@ concl: `@[%a@ = %a@]`"
-                          Fmt.(Dump.list K.Thm.pp_quoted) hyps
-                          E.pp t E.pp u);
-            Error.failf ~loc "failed to prove CC-lemma@ %a" P.pp p
-          | Some thm ->
-            Clause.of_thm thm
-        end
+        let ok = check_absurd_by_cc neg_lits in
+        if ok then (
+          let c =
+            Lit.make true (E.app_eq ctx t u) ::
+            List.rev_map Lit.neg hyp_lits in
+          Clause.of_list c
+        ) else (
+          Error.failf ~loc
+            "failed to prove CC-lemma-imply@ :negated-literals %a@ :step %a"
+            (Fmt.Dump.list @@ Lit.pp_depth ~max_depth:4) neg_lits P.pp p
+        )
 
       | P.CC_lemma c ->
         let c = conv_clause c in
 
-        let pos = Clause.pos_lits_list c in
-        let negs = Clause.neg_lits_list c in
-        begin match pos with
-          | [goal] ->
+        (* check that [¬C] is absurd *)
+        let neg_lits =
+          Clause.lits c
+          |> Iter.map Lit.neg
+          |> Iter.to_rev_list
+        in
 
-            let goal = Lit.atom goal in
-            let ps = List.map (fun l -> K.Thm.assume ctx (Lit.atom l)) negs in
-
-            (* prove [negs |- goal] *)
-            Log.debug
-              (fun k->k"cc-lemma@ :ps %a@ :goal %a"
-                      (Fmt.Dump.list K.Thm.pp_quoted) ps E.pp goal);
-
-            let module CC = Trustee_core.Congruence_closure in
-            begin match CC.prove_cc_bool ctx ps goal with
-              | None ->
-                Log.err (fun k->k"clause: %a" Clause.pp c);
-                Error.failf ~loc "failed to prove@ %a" P.pp p
-              | Some thm ->
-                Clause.of_thm thm
-            end
-          | _ ->
-            Error.failf ~loc
-              "cc-lemma: expected exactly one positive literal@ in %a"
-              Fmt.(Dump.list Lit.pp) (Clause.lits_list c)
-          end
+        let ok = check_absurd_by_cc neg_lits in
+        if ok then (
+          c
+        ) else (
+          Error.failf ~loc
+            "failed to prove CC-lemma@ :negated-literals %a@ \
+             :expected-clause %a@ :step %a"
+            (Fmt.Dump.list @@ Lit.pp_depth ~max_depth:4) neg_lits
+            Clause.pp c P.pp p
+        )
 
       | P.Paramod1 { rw_with; p=passive } ->
         let rw_with = check_proof_rec rw_with in
@@ -710,16 +701,11 @@ module Make(A : ARG) : S = struct
           let hyps_using =
             using
             |> Iter.of_list
-            |> Iter.filter_map
-              (fun c ->
-                 match Clause.uniq_pos_lit c with
-                 | Some lit -> Some (K.Thm.axiom ctx [] (Lit.atom lit))
-                 | None -> None)
+            |> Iter.filter_map Clause.uniq_pos_lit
           and hyps_neg_res =
             res
             |> Clause.lits
             |> Iter.map Lit.neg
-            |> Iter.map (fun lit -> K.Thm.axiom ctx [] (Lit.to_expr lit))
           in
 
           (* hypotheses common to each subproof *)
@@ -732,27 +718,21 @@ module Make(A : ARG) : S = struct
              the common hypotheses ("using" side conditions,
              and the negated conclusion of [p]) *)
           let false_provable_with lit : bool =
-            let hyp_lit = K.Thm.axiom ctx [] (Lit.to_expr lit) in
+            let hyps = lit :: common_hyps in
 
-            let hyps = hyp_lit :: common_hyps in
+            let valid = check_absurd_by_cc hyps in
+            if not valid then (
+              Log.err
+                (fun k->k"(@[clause-rw: cannot prove@ :lit %a@ :from-hyps %a@])"
+                    (Lit.pp_depth ~max_depth:4) lit
+                    Fmt.(Dump.list @@ within "`" "`" @@
+                         Lit.pp_depth ~max_depth:4) common_hyps);
+              Log.debug (fun k->k"(@[all-hyps: %a@])"
+                            (Fmt.Dump.list @@ Lit.pp_depth ~max_depth:4)
+                            hyps);
 
-            begin match
-                CC.prove_cc_false ctx hyps ~prove_false ~not_e:Cst.not_
-              with
-              | Some th ->
-                Log.debug (fun k->k"prove-false yields@ `%a`" Thm.pp th);
-                true
-              | None ->
-                Log.err
-                  (fun k->k"(@[clause-rw: cannot prove@ :lit %a@ :from-hyps %a@])"
-                      (Lit.pp_depth ~max_depth:4) lit
-                      Fmt.(Dump.list @@ within "`" "`" @@
-                           K.Thm.pp_depth ~max_depth:4) common_hyps);
-                Log.debug (fun k->k"(@[all-hyps: %a@])"
-                              (Fmt.Dump.list @@ K.Thm.pp_depth ~max_depth:4)
-                              hyps);
-                false
-            end
+            );
+            valid
           in
 
           let bad =
@@ -1050,6 +1030,24 @@ module Make(A : ARG) : S = struct
       | P.Xor_i
       | P.Xor_e ->
         Error.failf ~loc "TODO: check bool-c@ %a" P.pp p
+    end
+
+  (** [check_absurd_by_cc lits] returns [true] if the conjunction of [lits]
+      is proven false by congruence closure + basic boolean reasoning
+      (mostly equating [a] with [a=true], and [¬a] with [a=false]) *)
+  and check_absurd_by_cc (lits: Lit.t list) : bool =
+    let hyp_of_lit lit = K.Thm.axiom ctx [] (Lit.to_expr lit) in
+    let hyps = List.rev_map hyp_of_lit lits in
+    begin match
+        CC.prove_cc_false ctx hyps ~prove_false ~not_e:Cst.not_
+      with
+      | Some th ->
+        Log.debug (fun k->k"cc.check-absurd: yields@ `%a`" Thm.pp th);
+        true
+      | None ->
+        Log.debug (fun k->k"cc.check-absurd: fails to prove unsat@ `%a`"
+                      (Fmt.Dump.list Lit.pp) lits);
+        false
     end
 
   (* do resolution between [c1] and [c2] *)

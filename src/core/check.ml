@@ -1,10 +1,12 @@
 
 open Common
-module Ast = Quip_core.Ast
-module Env = Quip_core.Env
-module CC = Trustee_core.Congruence_closure
 
 module Log = (val Logs.src_log (Logs.Src.create ~doc:"Proof checker" "quip.check"))
+
+module CC = Congruence_closure
+
+module K = Kernel
+module E = K.Expr
 
 type bad = string
 type stats = {
@@ -27,7 +29,7 @@ end
 module Make(A : ARG) : S = struct
   open A
   module Problem = (val A.problem)
-  module B = Quip_core.Builtin
+  module B = Builtin
 
   let unwrap_or_ msg = function
     | Some x -> x
@@ -41,240 +43,7 @@ module Make(A : ARG) : S = struct
         |> unwrap_or_ (fun() -> Error.makef ~loc "cannot find builtin %s" name)
       in
       K.Expr.const ctx c []
-
-    let not_ : K.expr = find_ ~loc:Loc.none "not" Quip_core.Builtin.Not
   end
-
-  (* turn [not e] into [Some e], any other term into [None] *)
-  let unfold_not_ (e:E.t) : E.t option =
-    match E.view e with
-    | E.E_app (f, u) when E.equal f Cst.not_ -> Some u
-    | _ -> None
-
-  (* always normalize equations so that the order in which they were
-     input does not matter. Also normalize under [not] because we might open it. *)
-  let rec normalize_expr_ e =
-    match unfold_not_ e with
-    | Some u ->
-      E.app ctx Cst.not_ (normalize_expr_ u)
-    | None ->
-      match E.unfold_eq e with
-      | Some (a,b) ->
-        let a = normalize_expr_ a in
-        let b = normalize_expr_ b in
-        if E.compare a b < 0 then E.app_eq ctx b a else E.app_eq ctx a b
-      | _ -> e
-
-  [@@@ocaml.warning "-32"]
-
-  (** {2 Literal} *)
-  module Lit : sig
-    type t [@@deriving show, eq, ord]
-    val pp_depth : ?max_depth:int -> t Fmt.printer
-    val neg : t -> t
-    val sign : t -> bool
-    val atom : t -> E.t
-    val to_expr : t -> E.t
-    val as_eqn : t -> (E.t * E.t) option
-    val make : bool -> E.t -> t
-  end = struct
-    type t = {
-      sign: bool;
-      expr: K.Expr.t;
-    } [@@deriving eq, ord]
-
-    let pp_depth ?max_depth out (self:t) =
-      let pp_t = match max_depth with
-        | None -> K.Expr.pp
-        | Some max_depth -> K.Expr.pp_depth ~max_depth in
-      let s = if self.sign then "+" else "-" in
-      Fmt.fprintf out "(@[%s@ %a@])" s pp_t self.expr
-    let pp = pp_depth ?max_depth:None
-    let show = Fmt.to_string pp
-
-    let[@inline] sign self = self.sign
-    let[@inline] atom self = self.expr
-    let[@inline] neg (self:t) : t = {self with sign=not self.sign}
-
-    let[@inline] make sign expr =
-      let expr = normalize_expr_ expr in
-      let expr, sign = match unfold_not_ expr with
-        | Some u -> u, not sign
-        | _ -> expr, sign
-      in
-      {sign;expr}
-
-    let to_expr (self:t) : K.expr =
-      if self.sign then self.expr
-      else E.app ctx Cst.not_ self.expr
-
-    let as_eqn self : _ option =
-      if self.sign then E.unfold_eq self.expr
-      else None
-  end
-
-  (** {2 Direct form clause} *)
-  module Clause : sig
-    type t [@@deriving show, eq]
-    val pp_depth: max_depth:int -> t Fmt.printer
-
-    val empty : t
-    val of_list : Lit.t list -> t
-    val of_iter : Lit.t Iter.t -> t
-    val add : Lit.t -> t -> t
-    val singleton : Lit.t -> t
-    val remove : Lit.t -> t -> t
-    val size : t -> int
-    val mem : Lit.t -> t -> bool
-    val subset : t -> t -> bool
-    val union : t -> t -> t
-    val to_iter : t -> Lit.t Iter.t
-
-    val subst : recursive:bool -> t -> K.Subst.t -> t
-    val lits : t -> Lit.t Iter.t
-
-    val pos_lits : t -> Lit.t Iter.t
-    val neg_lits : t -> Lit.t Iter.t
-    val pos_lits_list : t -> Lit.t list
-    val neg_lits_list : t -> Lit.t list
-
-    val find_lit_by_term : K.expr -> t -> Lit.t option
-    (** [find_lit_by_term e c] finds a literal of [c] with atom [e],
-        or [None] *)
-
-    val of_thm : K.thm -> t
-    (** Turn a theorem into a (Horn) clause. *)
-
-    val as_singleton : t -> Lit.t option
-    (** [as_singleton (singleton lit)] is [Some lit]. For non unary
-        clauses it returns [None]. *)
-
-    val uniq_pos_lit : t -> Lit.t option
-    (** [uniq_pos_lit c] returns the unique positive literal of [c] if
-        [c] contains exactly one positive literal. Otherwise, returns [None] *)
-
-    val uniq_neg_lit : t -> Lit.t option
-
-    val lits_list : t -> Lit.t list
-  end = struct
-    module ESet = K.Expr.Set
-    type t = {
-      neg: ESet.t;
-      pos: ESet.t;
-    } [@@deriving eq, ord]
-    let lits self k =
-      ESet.iter (fun t -> k (Lit.make false t)) self.neg;
-      ESet.iter (fun t -> k (Lit.make true t)) self.pos
-
-    let pp out self =
-      Fmt.fprintf out "(@[<hv>cl@ %a@])"
-        Fmt.(iter ~sep:(return "@ ") Lit.pp) (lits self)
-
-    let pp_depth ~max_depth out self =
-      Fmt.fprintf out "(@[<hv>cl@ %a@])"
-        Fmt.(iter ~sep:(return "@ ") @@ Lit.pp_depth ~max_depth) (lits self)
-
-    let show = Fmt.to_string pp
-
-    let mem x self =
-      if Lit.sign x
-      then ESet.mem (Lit.atom x) self.pos
-      else ESet.mem (Lit.atom x) self.neg
-
-    let empty = {pos=ESet.empty; neg=ESet.empty}
-    let mk_ pos neg = {pos; neg}
-
-    let singleton lit =
-      if Lit.sign lit
-      then mk_ (ESet.singleton (Lit.atom lit)) ESet.empty
-      else mk_ ESet.empty (ESet.singleton (Lit.atom lit))
-
-    let size a = ESet.cardinal a.pos + ESet.cardinal a.neg
-
-    let add lit self =
-      if Lit.sign lit
-      then {self with pos=ESet.add (Lit.atom lit) self.pos}
-      else {self with neg=ESet.add (Lit.atom lit) self.neg}
-
-    let add' s x = add x s
-
-    let of_list = List.fold_left add' empty
-    let of_iter = Iter.fold add' empty
-
-    let subset c1 c2 = ESet.subset c1.pos c2.pos && ESet.subset c1.neg c2.neg
-
-    let remove lit self =
-      if Lit.sign lit
-      then {self with pos=ESet.remove (Lit.atom lit) self.pos}
-      else {self with neg=ESet.remove (Lit.atom lit) self.neg}
-
-    let lits_list self = lits self |> Iter.to_rev_list
-
-    let union c1 c2 =
-      {pos=ESet.union c1.pos c2.pos; neg=ESet.union c1.neg c2.neg}
-
-    let as_singleton_e_ eset = match ESet.choose_opt eset with
-      | Some e ->
-        if ESet.is_empty (ESet.remove e eset) then Some e else None
-      | None -> None
-
-    let as_singleton self =
-      match ESet.is_empty self.neg, ESet.is_empty self.pos with
-      | true, false ->
-        as_singleton_e_ self.pos |> CCOpt.map (Lit.make true)
-      | false, true ->
-        as_singleton_e_ self.neg |> CCOpt.map (Lit.make false)
-      | _ -> None
-
-    let to_iter = lits
-
-    let pos_lits self =
-      ESet.to_iter self.pos |> Iter.map (Lit.make true)
-
-    let neg_lits self =
-      ESet.to_iter self.neg |> Iter.map (Lit.make false)
-
-    let pos_lits_list self = pos_lits self |> Iter.to_rev_list
-    let neg_lits_list self = neg_lits self |> Iter.to_rev_list
-
-    let find_lit_by_term e (self:t) : Lit.t option =
-      let e = normalize_expr_ e in
-      if ESet.mem e self.pos then Some (Lit.make true e)
-      else if ESet.mem e self.neg then Some (Lit.make false e)
-      else None
-
-    let uniq_lit_of_sign_ sign self =
-      if sign
-      then as_singleton_e_ self.pos |> CCOpt.map (Lit.make true)
-      else as_singleton_e_ self.neg |> CCOpt.map (Lit.make false)
-
-    let uniq_pos_lit self = uniq_lit_of_sign_ true self
-    let uniq_neg_lit self = uniq_lit_of_sign_ false self
-
-    let subst ~recursive self subst : t =
-      if K.Subst.is_empty subst then self
-      else (
-        to_iter self
-        |> Iter.map
-          (fun lit ->
-            let sign = Lit.sign lit in
-            let e = E.subst ~recursive ctx (Lit.atom lit) subst in
-            Lit.make sign e)
-        |> of_iter
-      )
-
-    let of_thm th =
-      let concl = K.Thm.concl th in
-      let c = singleton (Lit.make true concl) in
-      Iter.fold
-        (fun c t ->
-           let lit = Lit.make false t in
-           add lit c)
-        c
-        (K.Thm.hyps_iter th)
-  end
-
-  [@@@ocaml.warning "+32"]
 
   (* if [e] the builtin [b]? *)
   let is_builtin_const_ b (e:E.t) : bool =
@@ -291,18 +60,6 @@ module Make(A : ARG) : S = struct
     match Problem.find_builtin b with
     | Some c -> c
     | None -> Error.failf ~loc "cannot find builtin %a" B.pp b
-
-  (* takes [|- a] and [|- ¬a] and returns [|- false] *)
-  let prove_false =
-    let v = K.Var.make "A" (E.bool ctx) in
-    let e_v = E.var ctx v in
-    let false_ = E.const ctx (get_builtin_ ~loc:Loc.none B.False) [] in
-    let th0 = Thm.axiom ctx [e_v; E.app ctx Cst.not_ e_v] false_ in
-    fun _ctx (th1: Thm.t) (th2: Thm.t) : Thm.t ->
-      let e = Thm.concl th1 in
-      let subst = K.Subst.of_list [v, e] in
-      let th0' = Thm.subst ~recursive:false ctx th0 subst in
-      Thm.cut ctx th1 @@ Thm.cut ctx th2 th0'
 
   (* unfold builtin application. *)
   let unfold_builtin ~loc b e : _ list option =
@@ -407,7 +164,7 @@ module Make(A : ARG) : S = struct
           | T.Var {name;_}, l ->
             begin match Problem.find_const_by_name name, l with
               | Some (c, Some b), e1 :: tl
-                when Quip_core.Builtin.is_assoc b ->
+                when Builtin.is_assoc b ->
                 (* associative operator *)
                 List.fold_left
                   (fun e1 e2 -> K.Expr.app_l ctx (K.Expr.const ctx c []) [e1;e2])
@@ -439,7 +196,7 @@ module Make(A : ARG) : S = struct
         end
       | T.Not u ->
         let u = conv_term u in
-        E.app ctx Cst.not_ u
+        E.not_ ctx u
       | T.Ite (a,b,c) ->
         let ite = get_builtin_ ~loc B.If in
         let a = conv_term a in
@@ -474,9 +231,9 @@ module Make(A : ARG) : S = struct
 
   let conv_lit (t: Ast.term) : Lit.t =
     let t = conv_term t in
-    match unfold_not_ t with
-    | Some u -> Lit.make false u
-    | None -> Lit.make true t
+    match E.unfold_not t with
+    | Some u -> Lit.make ctx false u
+    | None -> Lit.make ctx true t
 
   let conv_lits (lits: Ast.term list) : Clause.t =
     Log.debug (fun k->k"conv-lits %a" (Fmt.Dump.list Ast.Term.pp) lits);
@@ -525,16 +282,16 @@ module Make(A : ARG) : S = struct
 
       | P.Refl t ->
         let t = conv_term t in
-        Clause.of_thm (K.Thm.refl ctx t)
+        Clause.singleton (Lit.make ctx true (E.app_eq ctx t t))
 
       | P.Assert t ->
         Log.warn (fun k->k"TODO: find assert in assumptions");
         (* FIXME: lookup in problem? *)
         (* TODO: use theory mechanism to track asserts *)
 
-        (* assume: [¬t \/ t] *)
+        (* assume: [t] *)
         let t = conv_term t in
-        Clause.singleton (Lit.make true t)
+        Clause.singleton (Lit.make ctx true t)
 
       | P.Assert_c c ->
         (* FIXME: lookup in problem? *)
@@ -595,12 +352,12 @@ module Make(A : ARG) : S = struct
         in
 
         (* [hyps /\ t ≠ u] *)
-        let neg_lits = Lit.make false (E.app_eq ctx t u) :: hyp_lits in
+        let neg_lits = Lit.make ctx false (E.app_eq ctx t u) :: hyp_lits in
 
-        let ok = check_absurd_by_cc neg_lits in
+        let ok = check_absurd_by_cc ~loc neg_lits in
         if ok then (
           let c =
-            Lit.make true (E.app_eq ctx t u) ::
+            Lit.make ctx true (E.app_eq ctx t u) ::
             List.rev_map Lit.neg hyp_lits in
           Clause.of_list c
         ) else (
@@ -619,7 +376,7 @@ module Make(A : ARG) : S = struct
           |> Iter.to_rev_list
         in
 
-        let ok = check_absurd_by_cc neg_lits in
+        let ok = check_absurd_by_cc ~loc neg_lits in
         if ok then (
           c
         ) else (
@@ -720,7 +477,7 @@ module Make(A : ARG) : S = struct
           let false_provable_with lit : bool =
             let hyps = lit :: common_hyps in
 
-            let valid = check_absurd_by_cc hyps in
+            let valid = check_absurd_by_cc ~loc hyps in
             if not valid then (
               Log.err
                 (fun k->k"(@[clause-rw: cannot prove@ :lit %a@ :from-hyps %a@])"
@@ -825,7 +582,7 @@ module Make(A : ARG) : S = struct
       | P.Subst (subst, p1) ->
         let p1 = check_proof_rec p1 in
         let subst = conv_subst subst in
-        Clause.subst ~recursive:false p1 subst
+        Clause.subst ctx ~recursive:false p1 subst
 
       | P.Hres (init, steps) ->
 
@@ -839,20 +596,20 @@ module Make(A : ARG) : S = struct
 
       | P.Bool_true_is_true ->
         let true_ = E.const ctx (get_builtin_ ~loc B.True) [] in
-        Clause.singleton @@ Lit.make true true_
+        Clause.singleton @@ Lit.make ctx true true_
 
       | P.Bool_true_neq_false ->
         let true_ = E.const ctx (get_builtin_ ~loc B.True) [] in
         let false_ = E.const ctx (get_builtin_ ~loc B.False) [] in
         let eq = E.app_eq ctx true_ false_ in
-        Clause.singleton @@ Lit.make false eq
+        Clause.singleton @@ Lit.make ctx false eq
 
       | P.Ite_true t_ite ->
         (* clause [(cl (- a) (+ (= (ite a b c) b)))] *)
         let t_ite = conv_term t_ite in
         begin match E.unfold_app t_ite with
           | ite, [a;b;_c] when is_builtin_const_ B.If ite ->
-            Clause.of_list [Lit.make false a; Lit.make true (E.app_eq ctx t_ite b)]
+            Clause.of_list [Lit.make ctx false a; Lit.make ctx true (E.app_eq ctx t_ite b)]
           | _ ->
             Error.failf ~loc
               "expected a `ite` term,@ got `%a`" E.pp t_ite
@@ -865,8 +622,8 @@ module Make(A : ARG) : S = struct
           | ite, [a;_b;c] when is_builtin_const_ B.If ite ->
             let c =
               Clause.of_list [
-                Lit.make false (E.app ctx Cst.not_ a);
-                Lit.make true (E.app_eq ctx t_ite c)
+                Lit.make ctx false (E.not_ ctx a);
+                Lit.make ctx true (E.app_eq ctx t_ite c)
               ] in
             c
           | _ ->
@@ -895,7 +652,7 @@ module Make(A : ARG) : S = struct
     end
 
   and check_bool_c ~loc p name (ts:K.expr list) : Clause.t =
-    let module B = Quip_core.Builtin in
+    let module B = Builtin in
 
     let get1 = function [t] -> Some t | _ -> None in
     let get2 = function [t;u] -> Some (t,u) | _ -> None in
@@ -911,7 +668,7 @@ module Make(A : ARG) : S = struct
             let* args = unfold_builtin ~loc B.And and_ in
             let c =
               Clause.of_list
-                (Lit.make true and_ :: List.map (Lit.make false) args)
+                (Lit.make ctx true and_ :: List.map (Lit.make ctx false) args)
             in
             Some c
           with
@@ -930,7 +687,7 @@ module Make(A : ARG) : S = struct
             let* args = unfold_builtin ~loc B.And and_ in
             let ok = CCList.mem ~eq:E.equal u args in
             let c =
-              if ok then Clause.of_list [Lit.make false and_; Lit.make true u]
+              if ok then Clause.of_list [Lit.make ctx false and_; Lit.make ctx true u]
               else Error.failf ~loc "%a does not occur in %a" E.pp u Fmt.(Dump.list E.pp) args
             in
             Some c
@@ -950,7 +707,7 @@ module Make(A : ARG) : S = struct
             let* args = unfold_builtin ~loc B.Or or_ in
             let ok = CCList.mem ~eq:E.equal u args in
             let c =
-              if ok then Clause.of_list [Lit.make false u; Lit.make true or_]
+              if ok then Clause.of_list [Lit.make ctx false u; Lit.make ctx true or_]
               else Error.failf ~loc "%a does not occur in %a" E.pp u Fmt.(Dump.list E.pp) args
             in
             Some c
@@ -970,7 +727,7 @@ module Make(A : ARG) : S = struct
             let* args = unfold_builtin ~loc B.Or or_ in
             let c =
               Clause.of_list
-                (Lit.make false or_ :: List.map (Lit.make true) args)
+                (Lit.make ctx false or_ :: List.map (Lit.make ctx true) args)
             in
             Some c
           with
@@ -994,7 +751,9 @@ module Make(A : ARG) : S = struct
             in
             let c =
               Clause.of_list
-                (Lit.make false imp :: Lit.make true ret :: List.map (Lit.make false) args)
+                (Lit.make ctx false imp ::
+                 Lit.make ctx true ret ::
+                 List.map (Lit.make ctx false) args)
             in
             Some c
           with
@@ -1011,9 +770,9 @@ module Make(A : ARG) : S = struct
             let* eq, t = get2 ts in
             let* a, b = E.unfold_eq eq in
             if E.equal t a then
-              Some (Clause.of_list [Lit.make false eq; Lit.make false t; Lit.make true b])
+              Some (Clause.of_list [Lit.make ctx false eq; Lit.make ctx false t; Lit.make ctx true b])
             else if E.equal t b then
-              Some (Clause.of_list [Lit.make false eq; Lit.make false t; Lit.make true a])
+              Some (Clause.of_list [Lit.make ctx false eq; Lit.make ctx false t; Lit.make ctx true a])
             else
               None
           with
@@ -1035,14 +794,14 @@ module Make(A : ARG) : S = struct
   (** [check_absurd_by_cc lits] returns [true] if the conjunction of [lits]
       is proven false by congruence closure + basic boolean reasoning
       (mostly equating [a] with [a=true], and [¬a] with [a=false]) *)
-  and check_absurd_by_cc (lits: Lit.t list) : bool =
-    let hyp_of_lit lit = K.Thm.axiom ctx [] (Lit.to_expr lit) in
-    let hyps = List.rev_map hyp_of_lit lits in
+  and check_absurd_by_cc ~loc (lits: Lit.t list) : bool =
+    let true_ = E.const ctx (get_builtin_ ~loc B.True) [] in
+    let false_ = E.const ctx (get_builtin_ ~loc B.False) [] in
     begin match
-        CC.prove_cc_false ctx hyps ~prove_false ~not_e:Cst.not_
+        CC.is_absurd ctx lits ~true_ ~false_
       with
-      | Some th ->
-        Log.debug (fun k->k"cc.check-absurd: yields@ `%a`" Thm.pp th);
+      | Some proof ->
+        Log.debug (fun k->k"cc.check-absurd: yields@ `%a`" CC.Proof.pp proof);
         true
       | None ->
         Log.debug (fun k->k"cc.check-absurd: fails to prove unsat@ `%a`"
@@ -1055,7 +814,7 @@ module Make(A : ARG) : S = struct
     Log.debug (fun k->k "(@[resolve@ :c1 %a@ :c2 %a@ :pivot %a@])"
                   Clause.pp c1 Clause.pp c2 E.pp pivot);
     (* find the polarity of [pivot] in [c1] *)
-    match Clause.find_lit_by_term pivot c1 with
+    match Clause.find_lit_by_term ctx pivot c1 with
     | Some lit ->
       let lit' = Lit.neg lit in
       if Clause.mem lit' c2 then (
@@ -1077,7 +836,7 @@ module Make(A : ARG) : S = struct
                   Clause.pp c1 Clause.pp c2 E.pp lhs E.pp rhs);
     (* find if [c2] contains [lhs=rhs] or [rhs=lhs] *)
     match
-      Clause.find_lit_by_term lhs c1,
+      Clause.find_lit_by_term ctx lhs c1,
       (Clause.lits c2
        |> Iter.filter Lit.sign
        |> Iter.find_map
@@ -1102,11 +861,11 @@ module Make(A : ARG) : S = struct
     | Some lit_lhs, Some lit_eqn ->
       assert (Lit.sign lit_eqn);
       (* preserve sign of the rewritten literal *)
-      let new_lit = Lit.make (Lit.sign lit_lhs) rhs in
+      let new_lit = Lit.make ctx (Lit.sign lit_lhs) rhs in
       Clause.(
         add new_lit @@
         union
-          (remove (Lit.make true lhs) c1)
+          (remove (Lit.make ctx true lhs) c1)
           (remove lit_eqn c2)
       )
 
@@ -1211,10 +970,11 @@ module Make(A : ARG) : S = struct
       let rhs = conv_term rhs in
 
       (* [(name:ty) = rhs] as defining equation *)
-      let defe = E.app_eq ctx (E.var_name ctx name ty) rhs in
-      let th, c = K.Thm.new_basic_definition ctx defe in
-      Problem.def_const name c th;
-      Some (Clause.of_thm th)
+      let c = E.new_const ctx name [] ty in
+      let defe = E.app_eq ctx (E.const ctx c []) rhs in
+      let clause = Clause.singleton (Lit.make ctx true defe) in
+      Problem.def_const name c clause;
+      Some clause
     end
 
   let check_proof p =

@@ -4,6 +4,7 @@ type env = Env.t
 type parsed_pb = env
 
 module Log = (val Logs.src_log (Logs.Src.create ~doc:"Problem parser for Quip" "quip.parse-pb"))
+module K = Kernel
 
 exception E of string
 let error e = raise (E e)
@@ -147,8 +148,8 @@ module Mk_smtlib(Env : Env.S) = struct
 
       | SA.Stmt_assert t ->
         let t = conv_expr t in
-        let th = K.Thm.axiom ctx [] t in
-        Log.info (fun k->k"(@[assert@ %a@])" K.Thm.pp_quoted th);
+        let th = Clause.singleton (Lit.make ctx true t) in
+        Log.info (fun k->k"(@[assert@ `%a`@])" Clause.pp th);
         Env.add_assumption th;
 
       | SA.Stmt_fun_def _ | SA.Stmt_fun_rec _

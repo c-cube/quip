@@ -3,6 +3,8 @@
 
 open Common
 
+module K = Kernel
+
 type env = Env.t
 type parsed_pb = env
 

@@ -3,9 +3,12 @@
 
 open Common
 
+module K = Kernel
+module E = K.Expr
+
 type t
 
-val create : K.ctx -> Quip_core.Env.t -> t
+val create : K.ctx -> Env.t -> t
 
 type stats = {
   n_valid: int;
@@ -15,4 +18,4 @@ type stats = {
 
 type bad = string
 
-val check_proof : t -> Quip_core.Ast.Proof.t -> bool * bad list * Error.t list * stats
+val check_proof : t -> Ast.Proof.t -> bool * bad list * Error.t list * stats

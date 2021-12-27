@@ -2,6 +2,7 @@
 (** {1 Proof checker} *)
 
 module Log = (val Logs.src_log (Logs.Src.create "quip.main"))
+module K = Kernel
 
 let hrule = String.make 60 '='
 
@@ -27,11 +28,11 @@ let main ~quiet ~problem proof : 'a =
       env
   in
 
-  let checker = Quip_check.Check.create ctx env in
+  let checker = Check.create ctx env in
 
   Fmt.printf "checking proof…@.";
-  let proof_valid, bad_steps, errors, stats = Quip_check.Check.check_proof checker proof in
-  Fmt.printf "; @[<h>%a@]@." Quip_check.Check.pp_stats stats;
+  let proof_valid, bad_steps, errors, stats = Check.check_proof checker proof in
+  Fmt.printf "; @[<h>%a@]@." Check.pp_stats stats;
   if proof_valid then (
     Fmt.printf "@{<Green>OK@}@.";
   ) else (

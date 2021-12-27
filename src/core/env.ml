@@ -1,6 +1,8 @@
 
 open Common
 
+module K = Kernel
+
 module type S = sig
   val ctx : K.ctx
 
@@ -10,20 +12,20 @@ module type S = sig
 
   val find_ty_const_by_name : string -> K.ty_const option
 
-  val find_const_def : string -> (K.const * K.thm) option
+  val find_const_def : string -> (K.const * Clause.t) option
 
   (* TODO: named terms? *)
 
-  val add_assumption : K.thm -> unit
+  val add_assumption : Clause.t -> unit
 
-  val assumptions : unit -> K.thm Seq.t
+  val assumptions : unit -> Clause.t Seq.t
 
   val decl_ty_const : string -> K.ty_const -> unit
 
   val decl_const : string -> K.const -> unit
   (** Declare constant *)
 
-  val def_const : string -> K.const -> K.thm -> unit
+  val def_const : string -> K.const -> Clause.t -> unit
   (** Declare + define constant *)
 
   val pp_debug : unit Fmt.printer
@@ -52,10 +54,10 @@ let make_new_smt2 ?(ctx=K.Ctx.create()) () : t =
       ctx: K.ctx [@opaque];
       consts: (string, (K.const [@printer K.Const.pp]) * Builtin.t option) tbl;
       ty_consts: (string, K.ty_const [@printer K.Const.pp]) tbl;
-      defs: (string, (K.const [@printer K.Const.pp]) * K.Thm.t) tbl;
+      defs: (string, (K.const [@printer K.Const.pp]) * Clause.t) tbl;
       named_terms: (string, K.Expr.t) tbl;
       builtins: (K.const [@printer K.Const.pp]) Builtin.Tbl.t;
-      assms: (K.Thm.t [@printer K.Thm.pp_quoted]) vec;
+      assms: Clause.t vec;
     } [@@deriving show {with_path=false}]
 
     let env =

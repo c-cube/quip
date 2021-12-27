@@ -7,7 +7,6 @@
   (license MIT)
   (depends
     (containers (and (>= "3.0") (< "4.0")))
-    trustee
     ppx_deriving
     (smtlib-utils (>= "0.3"))
     (ounit2 :with-test)

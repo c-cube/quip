@@ -1,3 +1,0 @@
-[submodule "vendor/trustee"]
-	path = vendor/trustee
-	url = https://github.com/c-cube/trustee.git

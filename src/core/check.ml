@@ -356,9 +356,7 @@ module Make(A : ARG) : S = struct
 
         let ok = check_absurd_by_cc ~loc neg_lits in
         if ok then (
-          let c =
-            Lit.make ctx true (E.app_eq ctx t u) ::
-            List.rev_map Lit.neg hyp_lits in
+          let c = [Lit.make ctx true (E.app_eq ctx t u)] in
           Clause.of_list c
         ) else (
           Error.failf ~loc

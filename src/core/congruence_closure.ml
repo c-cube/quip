@@ -22,6 +22,8 @@ and expl =
   | Exp_cong
   | Exp_merge of Lit.t
   (* merge [a] and [b] because of theorem [… |- a=b], modulo commutativity *)
+  | Exp_eq of E.t * node * node
+  | Exp_not of E.t * node * node
 
 type merge_task = Merge of node * node * expl
 type update_sig_task = Update_sig of node [@@unboxed]
@@ -132,8 +134,10 @@ module Proof = struct
     | P_sym of t
     | P_trans of t * t
     | P_congr of t * t
+    | P_eq of E.t * t (* [(a=b)=true] because of [proof(a=b)] *)
+    | P_not of E.t * t (* [not a=true] because of [proof(a=false)] *)
     | P_lit of Lit.t
-  [@@deriving show {with_path=false}, eq]
+  [@@deriving show {with_path=false}]
 
   let sym p : t = match p with
     | P_sym p2 -> p2
@@ -181,12 +185,19 @@ and explain_along_ (self:t) (n0:node) (parent:node) : Proof.t =
               | _ -> Proof.lit lit_12
             end
           | Exp_cong ->
-            match n1.sigt, n2.sigt with
-            | Some (S_app (a1,b1)), Some (S_app (a2,b2)) ->
-              let p_sub_1 = prove_eq self a1 a2 in
-              let p_sub_2 = prove_eq self b1 b2 in
-              Proof.congr p_sub_1 p_sub_2
-            | None, _ | _, None -> assert false
+            begin match n1.sigt, n2.sigt with
+              | Some (S_app (a1,b1)), Some (S_app (a2,b2)) ->
+                let p_sub_1 = prove_eq self a1 a2 in
+                let p_sub_2 = prove_eq self b1 b2 in
+                Proof.congr p_sub_1 p_sub_2
+              | None, _ | _, None -> assert false
+            end
+          | Exp_eq (e,n1,n2) ->
+            let p = prove_eq self n1 n2 in
+            Proof.P_eq (e,p)
+          | Exp_not (e,n1,n2) ->
+            let p = prove_eq self n1 n2 in
+            Proof.P_not (e,p)
         in
         (* now prove [|- n0.e = n2.e] *)
         let th' = Proof.trans p p_12 in
@@ -241,11 +252,38 @@ let update (self:t) : unit =
         | None -> ()
         | Some s ->
           let s' = canon_sig s in
-          match Sig_tbl.get self.sigs s' with
-          | None -> Sig_tbl.add self.sigs s' n
-          | Some n' when are_eq n n' -> ()
-          | Some n' ->
-            Vec.push self.to_merge @@ Merge (n,n',Exp_cong);
+          begin match Sig_tbl.get self.sigs s' with
+            | None -> Sig_tbl.add self.sigs s' n
+            | Some n' when are_eq n n' -> ()
+            | Some n' ->
+              Vec.push self.to_merge @@ Merge (n,n',Exp_cong);
+          end;
+
+          (* if [find(a) = find(b)], merge [a=b] with [true] *)
+          begin match E.unfold_eq n.e with
+            | Some (a,b) ->
+              let na = add_ self a in
+              let nb = add_ self b in
+              if find na==find nb then (
+                Vec.push self.to_merge @@
+                Merge (n, n_true self, Exp_eq (n.e, na, nb))
+              )
+            | None -> ()
+          end;
+
+          (* if [n == true], merge [not n] with [false] (and conversely) *)
+          begin match E.unfold_not n.e with
+            | Some u ->
+              let nu = add_ self u in
+              if find nu == n_true self then (
+                Vec.push self.to_merge @@
+                Merge (n, n_false self, Exp_not (n.e, n, n_false self))
+              ) else if find nu == n_false self then (
+                Vec.push self.to_merge @@
+                Merge (n, n_true self, Exp_not (n.e, n, n_true self))
+              )
+            | None -> ()
+          end;
       end
     done;
 

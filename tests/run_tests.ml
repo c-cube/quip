@@ -17,11 +17,11 @@ module Make() = struct
       Quip_core.Problem_parser.(parse_string ~syn:Smt2) ctx s
     with
     | Ok x -> x
-    | Error e -> errorf "cannot parse problem at line %d:@ %s" line e
+    | Error e -> Error.failf "cannot parse problem at line %d:@ %s" line e
 
   let parse_proof_str line s =
     try Quip_core.Parser.Proof.parse_string s
-    with e -> errorf "cannot parse proof at line %d:@ %a" line Fmt.exn e
+    with e -> Error.failf "cannot parse proof at line %d:@ %a" line Fmt.exn e
 
   let _debug = try Sys.getenv "DEBUG"="1" with _ -> false
   let () =
@@ -36,7 +36,7 @@ module Make() = struct
     let pb = parse_pb_str line pb in
     let proof = parse_proof_str line proof in
     let checker = Check.create ctx pb in
-    let ok, _stats = Check.check_proof checker proof in
+    let ok, _, _, _stats = Check.check_proof checker proof in
     Logs.info (fun k->k"line %d: res %b, stats %a@." line ok Check.pp_stats _stats);
     assert_equal ~msg:(Printf.sprintf "expect %B on line %d" expect line)
       ~printer:Fmt.(to_string bool) expect ok;
@@ -62,31 +62,31 @@ module Make() = struct
     (* test resolution + toplevel-style proof *)
     test_proof ~expect:true __LINE__ prelude0
     {|(quip 1)
-      (stepc c0 (cl (+ p0)) (assert-c (@ c0)))
-      (stepc c1 (cl (- p0) (+ q0)) (assert-c (@ c1)))
-      (stepc c2 (cl (- q0)) (assert-c (@ c2)))
+      (stepc c0 (cl 0) (assert-c (@ c0)))
+      (stepc c1 (cl (not p0) q0) (assert-c (@ c1)))
+      (stepc c2 (cl (not q0)) (assert-c (@ c2)))
       (stepc c3 (cl) (hres (@ c0) ((r p0 (@ c1)) (r1 (@ c2)))))
     |};
     (* basic CC *)
     test_proof ~expect:true __LINE__ prelude0
-    {|(quip 1 (steps () (
-        (stepc c0 (cl (+ (p1 a))) (assert-c (@ c0)))
-        (stepc c1 (cl (- (p1 b))) (assert-c (@ c1)))
-        (stepc c2 (cl (+ (= a b))) (assert-c (@ c2)))
-        (stepc c3 (cl (- (= a b)) (- (p1 a)) (+ (p1 b))) (ccl (@ c3)))
-        (stepc c4 (cl) (hres (@ c3) ((r1 (@ c0)) (r1 (@ c1)) (r1 (@ c2))))))))
+    {|(quip 1)
+        (stepc c0 (cl (p1 a)) (assert-c (@ c0)))
+        (stepc c1 (cl (not (p1 b))) (assert-c (@ c1)))
+        (stepc c2 (cl (= a b)) (assert-c (@ c2)))
+        (stepc c3 (cl (not (= a b)) (not (p1 a)) (p1 b)) (ccl (@ c3)))
+        (stepc c4 (cl) (hres (@ c3) ((r1 (@ c0)) (r1 (@ c1)) (r1 (@ c2)))))
         |};
     (* basic CC with bool *)
     test_proof ~expect:true __LINE__ prelude0
      {|(quip 1
         (with ((fa (f1 a)))
         (steps () (
-        (stepc c0 (cl (+ (= (f1 b) a))) (assert-c (@ c0)))
-        (stepc c1 (cl (+ (p1 fa))) (assert-c (@ c1)))
-        (stepc c2 (cl (+ (= b a))) (assert-c (@ c2)))
-        (stepc c3 (cl (- (p1 b))) (assert-c (@ c3)))
+        (stepc c0 (cl (= (f1 b) a)) (assert-c (@ c0)))
+        (stepc c1 (cl (p1 fa)) (assert-c (@ c1)))
+        (stepc c2 (cl (= b a)) (assert-c (@ c2)))
+        (stepc c3 (cl (not (p1 b))) (assert-c (@ c3)))
         (stepc lemma
-         (cl (- (p1 fa)) (- (= (f1 b) a)) (- (= b a)) (+ (p1 b)))
+         (cl (not (p1 fa)) (not (= (f1 b) a)) (not (= b a)) (p1 b))
          (ccl (@ lemma)))
         (stepc c4 (cl) (hres (@ lemma) ((r1 (@ c3)) (r1 (@ c2)) (r1 (@ c1)) (r1 (@ c0)))))
     ))))|};

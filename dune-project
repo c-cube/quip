@@ -1,10 +1,15 @@
 (lang dune 2.0)
 (name quip)
 (generate_opam_files true)
+(maintainers "Simon Cruanes")
+(authors "Simon Cruanes")
+(homepage "https://github.com/c-cube/quip")
+(source (github c-cube/quip))
 
 (package
   (name quip)
   (license MIT)
+  (synopsis "Proof checker for Quip")
   (depends
     (containers (and (>= "3.0") (< "4.0")))
     ppx_deriving

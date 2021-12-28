@@ -1,13 +1,13 @@
 
+open Quip_core
 open Quip_core.Common
 open OUnit2
-module K = Trustee_core.Kernel
-module Check = Quip_check.Check
+
+module K = Kernel
+module E = K.Expr
 
 module Make() = struct
   let ctx = K.Ctx.create()
-  module E = (val K.make_expr ctx)
-  module Th = (val K.make_thm ctx)
 
   let _src = Logs.Src.create "quip.test"
   module Log = (val Logs.src_log _src)
@@ -25,7 +25,8 @@ module Make() = struct
 
   let _debug = try Sys.getenv "DEBUG"="1" with _ -> false
   let () =
-    Logs.set_reporter (Logs.format_reporter());
+    Logs.set_reporter
+      (Logs.format_reporter ~app:Format.err_formatter ~dst:Format.err_formatter ());
     Logs.set_level ~all:true (if _debug then Some Logs.Debug else None);
     Logs.Src.set_level _src (Some (if _debug then Logs.Debug else Logs.Info))
 
@@ -36,8 +37,11 @@ module Make() = struct
     let pb = parse_pb_str line pb in
     let proof = parse_proof_str line proof in
     let checker = Check.create ctx pb in
-    let ok, _, _, _stats = Check.check_proof checker proof in
+    let ok, _, errs, _stats = Check.check_proof checker proof in
     Logs.info (fun k->k"line %d: res %b, stats %a@." line ok Check.pp_stats _stats);
+    if expect && errs<> [] then (
+      List.iter (fun e -> Log.err (fun k->k"got err: %a" Error.pp e)) errs;
+    );
     assert_equal ~msg:(Printf.sprintf "expect %B on line %d" expect line)
       ~printer:Fmt.(to_string bool) expect ok;
     ()
@@ -48,6 +52,7 @@ module Make() = struct
     (declare-fun a () U)
     (declare-fun b () U)
     (declare-fun c () U)
+    (declare-fun d () U)
     (declare-fun f1 (U) U)
     (declare-fun g1 (U) U)
     (declare-fun f2 (U U) U)
@@ -62,7 +67,7 @@ module Make() = struct
     (* test resolution + toplevel-style proof *)
     test_proof ~expect:true __LINE__ prelude0
     {|(quip 1)
-      (stepc c0 (cl 0) (assert-c (@ c0)))
+      (stepc c0 (cl p0) (assert-c (@ c0)))
       (stepc c1 (cl (not p0) q0) (assert-c (@ c1)))
       (stepc c2 (cl (not q0)) (assert-c (@ c2)))
       (stepc c3 (cl) (hres (@ c0) ((r p0 (@ c1)) (r1 (@ c2)))))
@@ -90,6 +95,19 @@ module Make() = struct
          (ccl (@ lemma)))
         (stepc c4 (cl) (hres (@ lemma) ((r1 (@ c3)) (r1 (@ c2)) (r1 (@ c1)) (r1 (@ c0)))))
     ))))|};
+    (* more CC *)
+    test_proof ~expect:true __LINE__ prelude0
+      {|
+      (quip 1
+      (steps()(
+      (stepc c0
+        (cl
+          (not (= (f2 a b) c))
+          (not (= d (f2 a b)))
+          (= d c))
+        (ccl (@ c0)))
+      )))
+      |};
     (* bad CC lemma *)
     test_proof ~expect:false __LINE__ prelude0
      {|(quip 1 (steps () (
@@ -100,12 +118,12 @@ module Make() = struct
     (* basic subst *)
     test_proof ~expect:true __LINE__ prelude0
      {|(quip 1 (steps () (
-        (stepc c0 (cl (+ (= (f2 (? x U) b) (? x U)))) (assert-c (@ c0)))
-        (stepc c2 (cl (+ (p1 (f2 a b)))) (assert-c (@ c2)))
-        (stepc c3 (cl (- (p1 a))) (assert-c (@ c3)))
-        (stepc c4 (cl (+ (= (f2 a b) a))) (subst (x a) (ref c0)))
+        (stepc c0 (cl (= (f2 (? x U) b) (? x U))) (assert-c (@ c0)))
+        (stepc c2 (cl (p1 (f2 a b))) (assert-c (@ c2)))
+        (stepc c3 (cl (not (p1 a))) (assert-c (@ c3)))
+        (stepc c4 (cl (= (f2 a b) a)) (subst (x a) (ref c0)))
         (stepc c5
-          (cl (- (= (f2 a b) a)) (- (p1 (f2 a b))) (+ (p1 a))) (ccl (@ c5)))
+          (cl (not (= (f2 a b) a)) (not (p1 (f2 a b))) (p1 a)) (ccl (@ c5)))
         (stepc c6 (cl)
           (hres (@ c5) ((r1 (@ c4)) (r1 (@ c3)) (r1 (@ c2)))))
     )))|};
@@ -119,7 +137,7 @@ module Make() = struct
       (decl p1 (-> u Bool))
       (decl f1 (-> u u))
       (stepc lemma
-       (cl (- (p1 (f1 a))) (- (= (f1 a) c)) (- (= c b)) (+ (p1 b)))
+       (cl (not (p1 (f1 a))) (not (= (f1 a) c)) (not (= c b)) (p1 b))
        (ccl (@ lemma)))
     |}
   ]

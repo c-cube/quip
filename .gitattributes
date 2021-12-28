@@ -1,0 +1,2 @@
+*.smt2 filter=lfs diff=lfs merge=lfs -text
+*.quip.gz filter=lfs diff=lfs merge=lfs -text

@@ -9,7 +9,7 @@
   (alias runtest)
   (locks /test)
   (action
-    ;(setenv DEBUG 1
+    (setenv DEBUG 1
     (run ./run_tests.exe -runner sequential -verbose false)
-    ;)
+    )
     ))

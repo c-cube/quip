@@ -108,6 +108,19 @@ module Make() = struct
         (ccl (@ c0)))
       )))
       |};
+    (* more CC *)
+    test_proof ~expect:true __LINE__ prelude0
+      {|
+      (quip 1
+      (steps()(
+      (stepc c0
+        (cl
+          (= c b)
+          (not (= (f2 a b) b))
+          (not (= c (f2 a b))))
+        (ccl (@ c0)))
+      )))
+      |};
     (* bad CC lemma *)
     test_proof ~expect:false __LINE__ prelude0
      {|(quip 1 (steps () (

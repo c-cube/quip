@@ -3,6 +3,7 @@ open Common
 
 module K = Kernel
 module E = Kernel.Expr
+module Log = (val Logs.src_log (Logs.Src.create "quip.cc"))
 
 module Vec = CCVector
 
@@ -73,6 +74,9 @@ and add_uncached_ self e =
       let n_f = find @@ add_ self f in
       let n_x = find @@ add_ self x in
       Some (S_app (n_f, n_x)), [n_f; n_x]
+    | E.E_not u ->
+      let n_u = find @@ add_ self u in
+      None, [n_u]
     | _ -> None, []
   in
   let rec node = {
@@ -248,6 +252,7 @@ let update (self:t) : unit =
   while not (Vec.is_empty self.to_merge && Vec.is_empty self.to_update_sig) do
     while not (Vec.is_empty self.to_update_sig) do
       let Update_sig n = Vec.pop_exn self.to_update_sig in
+      Log.debug (fun k->k"cc: update sig %a" E.pp n.e);
       begin match n.sigt with
         | None -> ()
         | Some s ->
@@ -270,21 +275,21 @@ let update (self:t) : unit =
               )
             | None -> ()
           end;
+      end;
 
-          (* if [n == true], merge [not n] with [false] (and conversely) *)
-          begin match E.unfold_not n.e with
-            | Some u ->
-              let nu = add_ self u in
-              if find nu == n_true self then (
-                Vec.push self.to_merge @@
-                Merge (n, n_false self, Exp_not (n.e, n, n_false self))
-              ) else if find nu == n_false self then (
-                Vec.push self.to_merge @@
-                Merge (n, n_true self, Exp_not (n.e, n, n_true self))
-              )
-            | None -> ()
-          end;
-      end
+      (* if [n == true], merge [not n] with [false] (and conversely) *)
+      begin match E.unfold_not n.e with
+        | Some u ->
+          let nu = add_ self u in
+          if find nu == find @@ n_true self then (
+            Vec.push self.to_merge @@
+            Merge (n, n_false self, Exp_not (n.e, n, n_false self))
+          ) else if find nu == find @@ n_false self then (
+            Vec.push self.to_merge @@
+            Merge (n, n_true self, Exp_not (n.e, n, n_true self))
+          )
+        | None -> ()
+      end;
     done;
 
     while not (Vec.is_empty self.to_merge) do
@@ -292,6 +297,12 @@ let update (self:t) : unit =
       let r1 = find n1 in
       let r2 = find n2 in
       if r1 != r2 then (
+        Log.debug (fun k->k"cc: merge `%a` and `%a`" E.pp n1.e E.pp n2.e);
+        (* make sure to keep true/false as representative *)
+        let n1, n2, r1, r2 =
+          if n2 == n_true self || n2 == n_false self
+          then n2, n1, r2, r1
+          else n1, n2, r1, r2 in
         (* add explanation for the merge *)
         reroot_at n1;
         assert (n1.expl == None);
@@ -314,22 +325,21 @@ let update (self:t) : unit =
   ()
 
 let add_lit (self:t) (lit:Lit.t) : unit =
-  match Lit.as_eqn lit with
-  | Some (a,b) ->
-    let a = add_ self a in
-    let b = add_ self b in
-    if not (are_eq a b) then (
-      Vec.push self.to_merge (Merge (a,b,Exp_merge lit));
-    );
-  | None ->
-    let n_bool = if Lit.sign lit then n_true self else n_false self in
-    let n = add_ self (Lit.atom lit) in
-    Vec.push self.to_merge (Merge (n, n_bool, Exp_merge lit))
-
-(* TODO: handle "not" in terms, also handle "a=b" merging to "true"
-   when a and b are merged. This must be done in update. *)
+  begin match Lit.as_eqn lit with
+    | Some (a,b) ->
+      let a = add_ self a in
+      let b = add_ self b in
+      if not (are_eq a b) then (
+        Vec.push self.to_merge (Merge (a,b,Exp_merge lit));
+      );
+    | None -> ()
+  end;
+  let n_bool = if Lit.sign lit then n_true self else n_false self in
+  let n = add_ self (Lit.atom lit) in
+  Vec.push self.to_merge (Merge (n, n_bool, Exp_merge lit))
 
 let is_absurd (ctx:K.ctx) ~true_ ~false_ (lits:Lit.t list) : Proof.t option =
+  Log.debug (fun k->k"(@[cc.is-absurd@ %a@])" (pp_l Lit.pp) lits);
   let self = create ctx ~true_ ~false_ in
   List.iter (add_lit self) lits;
   update self;

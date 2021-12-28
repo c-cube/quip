@@ -87,6 +87,10 @@ module Proof = struct
           let v = A.Var.make ~ty:(ty_of_sexp ty) v in
           T.fun_ ~loc v (loop bod)
 
+        | List [{s=List [{s=Atom "_";_}; {s=Atom "is";_}; {s=Atom c;_}];_}; u] ->
+          let u = loop u in
+          T.is_a ~loc c u
+
         | List ({s=Atom f;_} :: args) ->
           let args = List.map loop args in
           T.app_name ~loc f args

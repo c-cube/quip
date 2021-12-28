@@ -45,6 +45,10 @@ module Mk_smtlib(Env : Env.S) = struct
     | Some x -> x
     | None -> errorf "unknown constant '%s'" c
 
+  let find_cstor_ c = match Env.find_cstor c with
+    | Some x -> x
+    | None -> errorf "unknown cstor '%s'" c
+
   let conv_expr e : E.t =
     let app_str c l =
       let c, _is_b = find_const_ c in
@@ -125,7 +129,12 @@ module Mk_smtlib(Env : Env.S) = struct
            *)
         t
 
-      | SA.Arith (_, _)|SA.Match (_, _)|SA.Is_a (_, _)|SA.Fun (_, _)
+      | SA.Is_a (c, u) ->
+        let c = find_cstor_ c in
+        let u = loop' u in
+        E.app ctx (E.const ctx c.Datatype.c_isa []) u
+
+      | SA.Arith (_, _)|SA.Match (_, _)|SA.Fun (_, _)
       | SA.Cast (_, _)|SA.Forall (_, _)|SA.Exists (_, _) ->
         errorf "problem parser: unhandled expr: %a" SA.pp_term e
         (* TODO *)
@@ -186,14 +195,40 @@ module Mk_smtlib(Env : Env.S) = struct
                    let {SA.cstor_ty_vars=vs; cstor_name=c_name; cstor_args=l} = c in
                    if vs<> [] then errorf
                        "cannot handle polymorphic constructor `%s`" c_name;
-                   let args =
-                     List.map (fun (sel,ty) ->
-                       sel,conv_ty ~ty_vars:[] ty) l
+                   let d_ty = E.const ctx d_ty [] in
+
+                   let rec cstor = lazy (
+                     let tr_arg i (sel,ty_a) =
+                       let ty_a = conv_ty ~ty_vars:[] ty_a in
+
+                       let ty_sel = E.(arrow ctx d_ty ty_a) in
+                       let sel_c = E.new_const ctx sel [] ty_sel in
+                       Env.decl_const sel sel_c;
+                       let sel = {
+                         D.sel_name=sel;
+                         sel_ty=d;
+                         sel_c;
+                         sel_i=i;
+                         sel_cstor=cstor;
+                       } in
+                       sel, ty_a
+                     in
+
+                     let args = CCList.mapi tr_arg l in
+
+                     let ty_c = E.(arrow_l ctx (List.map snd args) d_ty) in
+                     let c = E.new_const ctx c_name [] ty_c in
+                     Env.decl_const c_name c;
+
+                     let c_isa =
+                       let ty = E.arrow ctx d_ty (E.bool ctx) in
+                       E.new_const ctx (Printf.sprintf "_ is %s" c_name) [] ty
+                     in
+
+                     {D.c_name; c_const=c; c_args=args; c_isa; c_ty=d}
+                   )
                    in
-                   let ty_c = E.(arrow_l ctx (List.map snd args) (E.const ctx d_ty [])) in
-                   let c = E.new_const ctx c_name [] ty_c in
-                   Env.decl_const c_name c;
-                   {D.c_name; c_const=c; c_args=args; c_ty=d}
+                   Lazy.force cstor
                 ) cstors
           } in
           let d = Lazy.force d in

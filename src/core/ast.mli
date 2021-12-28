@@ -37,6 +37,7 @@ module Term : sig
   type ('t,'ty) view =
     | App of 't * 't list
     | Fun of 'ty Var.t * 't
+    | Is_a of Name.t * 't
     | Var of 'ty option Var.t
     | Ite of 't * 't * 't
     | Not of 't
@@ -65,6 +66,7 @@ module Term : sig
   val let_ : loc:Loc.t -> (unit Var.t * t) list -> t -> t
   val fun_ : loc:Loc.t -> Ty.t Var.t -> t -> t
   val ite : loc:Loc.t -> t -> t -> t -> t
+  val is_a : loc:Loc.t -> Name.t -> t -> t
 end
 
 type term = Term.t

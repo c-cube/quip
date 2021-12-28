@@ -79,7 +79,6 @@ module Check = struct
 
     Fmt.printf "checking proof…@.";
     let proof_valid, bad_steps, errors, stats = Check.check_proof checker proof in
-    Fmt.printf "; @[<h>%a@]@." Check.pp_stats stats;
     if proof_valid then (
       Fmt.printf "@{<Green>OK@}@.";
     ) else (
@@ -87,6 +86,7 @@ module Check = struct
       Fmt.printf "; bad steps: %s@." (String.concat ", " bad_steps);
       Fmt.printf "@{<Red>FAIL@}@.";
     );
+    Fmt.printf "; @[<h>%a@]@." Check.pp_stats stats;
     Fmt.printf "; done in %.3fs@." (Chrono.elapsed chrono);
     if proof_valid then 0 else 1
 

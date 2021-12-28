@@ -48,6 +48,7 @@ module Term = struct
   type ('t,'ty) view =
     | App of 't * 't list
     | Fun of 'ty Var.t * 't
+    | Is_a of Name.t * 't
     | Var of 'ty option Var.t
     | Ite of 't * 't * 't
     | Not of 't
@@ -82,6 +83,7 @@ module Term = struct
   let fun_ ~loc v bod : t = mk_ ~loc (Fun (v,bod))
   let ite ~loc a b c : t = mk_ ~loc (Ite (a,b,c))
   let ref ~loc s : t = mk_ ~loc (Ref s)
+  let is_a ~loc c t : t = mk_ ~loc (Is_a(c,t))
 
   let rec rw ~(rule:t -> t option) (self:t) : t =
     match rule self with
@@ -93,6 +95,7 @@ module Term = struct
     | Var v -> Var.pp_name out v
     | App (f, l) ->
       Fmt.fprintf out "(@[%a@ %a@])" pp f (pp_l pp) l
+    | Is_a (c,t) -> Fmt.fprintf out "(@[(_ is %a)@ %a@])" Name.pp c pp t
     | Ite (a,b,c) -> Fmt.fprintf out "(@[ite@ %a@ %a@ %a@])" pp a pp b pp c
     | Not u -> Fmt.fprintf out "(@[@<1>¬@ %a@])" pp u
     | Let (bs, bod) ->

@@ -211,12 +211,20 @@ module Make(A : ARG) : S = struct
             Error.failf ~loc "reference to unknown term %S" name
         end
 
+      | T.Is_a (c,t) ->
+        let c = match Problem.find_cstor c with
+          | None -> Error.failf ~loc "unknown constructor '%s'" c
+          | Some c -> c
+        in
+        let t = conv_term t in
+        E.app ctx (E.const ctx c.c_isa []) t
+
       | T.Fun _ ->
         Error.failf ~loc "todo: conv lambda term `%a`" T.pp t
       | T.Let _ ->
         Error.failf ~loc "todo: conv let term `%a`" T.pp t
 
-      | _ ->
+      | T.As _ ->
         (* TODO *)
         Error.failf ~loc "todo: conv term `%a`" T.pp t
     end

@@ -12,6 +12,7 @@
     (ounit2 :with-test)
     logs
     mtime
+    (iter (>= "1.0"))
     (ocaml (>= "4.08"))
     pp_loc
     ))

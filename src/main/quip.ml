@@ -83,9 +83,9 @@ module Check = struct
     if proof_valid then (
       Fmt.printf "@{<Green>OK@}@.";
     ) else (
-      Fmt.printf "@{<Red>FAIL@}@.";
-      Fmt.printf "; bad steps: %s@." (String.concat ", " bad_steps);
       List.iter (Fmt.printf "%s@.%a@." hrule Error.pp) errors;
+      Fmt.printf "; bad steps: %s@." (String.concat ", " bad_steps);
+      Fmt.printf "@{<Red>FAIL@}@.";
     );
     Fmt.printf "; done in %.3fs@." (Chrono.elapsed chrono);
     if proof_valid then 0 else 1

@@ -114,9 +114,10 @@ module Mk_smtlib(Env : Env.S) = struct
         in
         app_assoc "and" "true" l2
 
-      | SA.Arith (_, _)|SA.Match
-          (_, _)|SA.Is_a (_, _)|SA.Fun (_, _)
-      |SA.Cast (_, _)|SA.Forall (_, _)|SA.Exists (_, _)|SA.Attr (_, _) ->
+      | SA.Attr (t, _) -> loop' t
+
+      | SA.Arith (_, _)|SA.Match (_, _)|SA.Is_a (_, _)|SA.Fun (_, _)
+      | SA.Cast (_, _)|SA.Forall (_, _)|SA.Exists (_, _) ->
         errorf "problem parser: unhandled expr: %a" SA.pp_term e
         (* TODO *)
     in

@@ -3,6 +3,7 @@ open Common
 type env = Env.t
 type parsed_pb = env
 
+module Datatype = Env.Datatype
 module Log = (val Logs.src_log (Logs.Src.create ~doc:"Problem parser for Quip" "quip.parse-pb"))
 module K = Kernel
 
@@ -164,7 +165,43 @@ module Mk_smtlib(Env : Env.S) = struct
       | SA.Stmt_fun_def _ | SA.Stmt_fun_rec _
       | SA.Stmt_funs_rec _ ->
         error "cannot handle function definition yet"
-      | SA.Stmt_data _ -> error "cannot handle datatype declaration yet"
+
+      | SA.Stmt_data ds ->
+
+        let module D = Datatype in
+
+        let decl_d ((name,ar), cstors) =
+          if ar<>0 then errorf "cannot handle polymorphic datatype %s" name;
+
+          let c = E.new_ty_const ctx name ar in
+          Env.decl_ty_const name c;
+          name, c, cstors
+        in
+
+        let handle_d (name,d_ty,cstors) =
+          let rec d = lazy {
+            D.name;
+            cstors=List.map
+                (fun (c:SA.cstor) ->
+                   let {SA.cstor_ty_vars=vs; cstor_name=c_name; cstor_args=l} = c in
+                   if vs<> [] then errorf
+                       "cannot handle polymorphic constructor `%s`" c_name;
+                   let args =
+                     List.map (fun (sel,ty) ->
+                       sel,conv_ty ~ty_vars:[] ty) l
+                   in
+                   let ty_c = E.(arrow_l ctx (List.map snd args) (E.const ctx d_ty [])) in
+                   let c = E.new_const ctx c_name [] ty_c in
+                   Env.decl_const c_name c;
+                   {D.c_name; c_const=c; c_args=args; c_ty=d}
+                ) cstors
+          } in
+          let d = Lazy.force d in
+          Env.add_datatype d;
+        in
+
+        let ds = List.map decl_d ds in
+        List.iter handle_d ds;
 
       | SA.Stmt_set_logic _|SA.Stmt_set_info (_, _)|SA.Stmt_set_option _
       | SA.Stmt_get_assertions | SA.Stmt_get_assignment | SA.Stmt_get_info _

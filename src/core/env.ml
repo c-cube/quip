@@ -3,6 +3,33 @@ open Common
 
 module K = Kernel
 
+module Datatype : sig
+  type t = {
+    name: string;
+    cstors: cstor list
+  }
+
+  and cstor = {
+    c_name: string;
+    c_const: K.const;
+    c_ty: t lazy_t;
+    c_args: (string * K.ty) list;
+  } [@@deriving show]
+end = struct
+  type t = {
+    name: string;
+    cstors: cstor list;
+  }
+
+  and cstor = {
+    c_name: string;
+    c_const: (K.const [@printer K.Const.pp]);
+    c_ty: (t [@printer fun out s -> Fmt.string out s.name]) lazy_t;
+    c_args: (string * (K.ty [@printer K.Expr.pp])) list;
+  } [@@deriving show {with_path=false}]
+
+end
+
 module type S = sig
   val ctx : K.ctx
 
@@ -14,11 +41,17 @@ module type S = sig
 
   val find_const_def : string -> (K.const * Clause.t) option
 
+  val find_cstor : string -> Datatype.cstor option
+
+  val find_datatype : string -> Datatype.t option
+
   (* TODO: named terms? *)
 
   val add_assumption : Clause.t -> unit
 
   val assumptions : unit -> Clause.t Seq.t
+
+  val add_datatype : Datatype.t -> unit
 
   val decl_ty_const : string -> K.ty_const -> unit
 
@@ -54,6 +87,8 @@ let make_new_smt2 ?(ctx=K.Ctx.create()) () : t =
       ctx: K.ctx [@opaque];
       consts: (string, (K.const [@printer K.Const.pp]) * Builtin.t option) tbl;
       ty_consts: (string, K.ty_const [@printer K.Const.pp]) tbl;
+      data: (string, Datatype.t) tbl;
+      cstors: (string, Datatype.cstor) tbl;
       defs: (string, (K.const [@printer K.Const.pp]) * Clause.t) tbl;
       named_terms: (string, K.Expr.t) tbl;
       builtins: (K.const [@printer K.Const.pp]) Builtin.Tbl.t;
@@ -66,6 +101,8 @@ let make_new_smt2 ?(ctx=K.Ctx.create()) () : t =
         consts=Hashtbl.create 32;
         ty_consts=Hashtbl.create 16;
         defs=Hashtbl.create 16;
+        data=Hashtbl.create 16;
+        cstors=Hashtbl.create 16;
         builtins=Builtin.Tbl.create 16;
         named_terms=Hashtbl.create 32;
         assms=CCVector.create();
@@ -108,6 +145,8 @@ let make_new_smt2 ?(ctx=K.Ctx.create()) () : t =
     let find_ty_const_by_name n = CCHashtbl.get env.ty_consts n
     let find_builtin b = Builtin.Tbl.get env.builtins b
     let find_const_def n = CCHashtbl.get env.defs n
+    let find_cstor n = CCHashtbl.get env.cstors n
+    let find_datatype n = CCHashtbl.get env.data n
     let add_assumption = CCVector.push env.assms
     let assumptions () = CCVector.to_seq env.assms
     let pp_debug out () = pp_env out env
@@ -116,6 +155,10 @@ let make_new_smt2 ?(ctx=K.Ctx.create()) () : t =
     let def_const name c th =
       Hashtbl.replace env.defs name (c,th);
       Hashtbl.replace env.consts name (c,None)
+
+    let add_datatype (d:Datatype.t) =
+      Hashtbl.replace env.data d.name d;
+      List.iter (fun c -> Hashtbl.replace env.cstors c.Datatype.c_name c) d.cstors
   end
   in
   (module M)

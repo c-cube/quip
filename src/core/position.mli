@@ -4,12 +4,11 @@
     A position in a string. Line and column are 1-based, so that compatibility
     with LSP is easier. *)
 
-module Fmt = CCFormat
+type t
+[@@deriving show]
 
-type t = {
-  line: int;
-  col: int;
-} [@@deriving show]
+val line : t -> int
+val col : t -> int
 
 val none : t
 val make : line:int -> col:int -> t

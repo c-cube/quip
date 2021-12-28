@@ -12,15 +12,19 @@ module Input : sig
   val file : string -> t
 end
 
-type t = {
+type ctx = {
   file: string;
-  start: Position.t;
-  stop: Position.t;
   input: Input.t;
 } [@@deriving show]
 
-val mk : input:Input.t -> filename:string -> int -> int -> int -> int -> t
-val mk_pair : input:Input.t -> filename:string -> int*int -> int*int -> t
+type t = {
+  ctx: ctx;
+  start: Position.t;
+  stop: Position.t;
+} [@@deriving show]
+
+val mk : ctx:ctx -> int -> int -> int -> int -> t
+val mk_pair : ctx:ctx -> int*int -> int*int -> t
 
 val of_lexbuf : input:Input.t -> Lexing.lexbuf -> t
 

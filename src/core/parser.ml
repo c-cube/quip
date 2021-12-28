@@ -25,8 +25,9 @@ module Proof = struct
     module S_arg = struct
       type t = sexp
       type loc = Loc.t
+      let ctx = {Loc.input=PA.input; file=PA.filename}
       let make_loc = Some (fun (x1,x2) (x3,x4) _ ->
-          Loc.mk ~input:PA.input ~filename:PA.filename x1 x2 x3 x4)
+          Loc.mk ~ctx x1 x2 x3 x4)
       let atom_with_loc ~loc s = {loc; s=Atom s}
       let list_with_loc ~loc l = {loc; s=List l}
       let atom = atom_with_loc ~loc:Loc.none
@@ -297,6 +298,7 @@ module Proof = struct
       | _ -> Error.failf ~loc "expected a composite step (`deft` or `stepc`)"
 
     let parse_sexp_l_ (l:sexp list) : P.t =
+      Profile.with_ "proof.decode-sexp" @@ fun () ->
       match l with
       | [{s=List [{s=Atom "quip";_}; {s=Atom "1";_}; bod];_}] -> p_of_sexp bod
       | {s=List [{s=Atom "quip";loc=loc1}; {s=Atom "1";_}];_} :: steps ->
@@ -310,7 +312,7 @@ module Proof = struct
 
     let parse_top lexbuf : P.t =
       let dec = Decoder.of_lexbuf lexbuf in
-      match Decoder.to_list dec with
+      match Profile.with1 "proof.parse-sexp" Decoder.to_list dec with
       | Ok l -> parse_sexp_l_ l
       | Error e -> Error.failf ~loc:Loc.none "expected proof (list of S-expressions), but:@ %s" e
   end

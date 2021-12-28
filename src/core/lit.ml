@@ -13,8 +13,8 @@ let pp_depth ?max_depth out (self:t) =
   let pp_t = match max_depth with
     | None -> E.pp
     | Some max_depth -> E.pp_depth ~max_depth in
-  let s = if self.sign then "+" else "-" in
-  Fmt.fprintf out "(@[%s@ %a@])" s pp_t self.expr
+  if self.sign then pp_t out self.expr
+  else Fmt.fprintf out "(@[not@ %a@])" pp_t self.expr
 let pp = pp_depth ?max_depth:None
 let show = Fmt.to_string pp
 

@@ -114,7 +114,15 @@ module Mk_smtlib(Env : Env.S) = struct
         in
         app_assoc "and" "true" l2
 
-      | SA.Attr (t, _) -> loop' t
+      | SA.Attr (t, _attrs) ->
+        let t = loop' t in
+        (* TODO:
+        List.iter (function
+            | ("named", name) -> Env.add_named_term env name t
+           | _ -> ()
+           _attrs;
+           *)
+        t
 
       | SA.Arith (_, _)|SA.Match (_, _)|SA.Is_a (_, _)|SA.Fun (_, _)
       | SA.Cast (_, _)|SA.Forall (_, _)|SA.Exists (_, _) ->

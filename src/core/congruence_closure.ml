@@ -18,6 +18,7 @@ type node = {
 
 and signature =
   | S_app of node * node
+  | S_eq of node * node
 
 and expl =
   | Exp_cong
@@ -33,10 +34,14 @@ type update_sig_task = Update_sig of node [@@unboxed]
 module Sig_tbl = CCHashtbl.Make(struct
     type t = signature
     let equal s1 s2 = match s1, s2 with
-      | S_app (x1,y1), S_app (x2,y2) ->
+      | S_app (x1,y1), S_app (x2,y2)
+      | S_eq (x1,y1), S_eq (x2,y2) ->
         x1==x2 && y1==y2
+      | (S_app _ | S_eq _), _ -> false
+
     let hash = function
       | S_app (a,b) -> CCHash.(combine3 28 (E.hash a.e) (E.hash b.e))
+      | S_eq (a,b) -> CCHash.(combine3 30 (E.hash a.e) (E.hash b.e))
   end)
 
 (* congruence closure state *)
@@ -63,21 +68,39 @@ let[@unroll 2] rec find (n:node) : node =
     root
   )
 
+let[@inline] canon_sig (s:signature) : signature =
+  match s with
+  | S_app (n1, n2) -> S_app (find n1, find n2)
+  | S_eq (n1, n2) ->
+    let n1 = find n1 in
+    let n2 = find n2 in
+    (* sort to handle commutativity *)
+    let n1, n2 = if E.compare n1.e n2.e < 0 then n1, n2 else n2, n1 in
+    S_eq (n1, n2)
+
 let rec add_ (self:t) (e:E.t) : node =
   try E.Tbl.find self.nodes e
   with Not_found ->
     add_uncached_ self e
 
 and add_uncached_ self e =
-  let sigt, subs = match E.view e with
-    | E.E_app (f, x) ->
-      let n_f = find @@ add_ self f in
-      let n_x = find @@ add_ self x in
-      Some (S_app (n_f, n_x)), [n_f; n_x]
-    | E.E_not u ->
-      let n_u = find @@ add_ self u in
-      None, [n_u]
-    | _ -> None, []
+  let sigt, subs =
+    match E.unfold_eq e with
+    | Some (a,b) ->
+      let n_a = find @@ add_ self a in
+      let n_b = find @@ add_ self b in
+      let s = S_eq (n_a,n_b) |> canon_sig in
+      Some s, [n_a; n_b]
+    | None ->
+      match E.view e with
+      | E.E_app (f, x) ->
+        let n_f = find @@ add_ self f in
+        let n_x = find @@ add_ self x in
+        Some (S_app (n_f, n_x)), [n_f; n_x]
+      | E.E_not u ->
+        let n_u = find @@ add_ self u in
+        None, [n_u]
+      | _ -> None, []
   in
   let rec node = {
     e; sigt; next=node; root=node; expl=None; parents=[];
@@ -194,7 +217,11 @@ and explain_along_ (self:t) (n0:node) (parent:node) : Proof.t =
                 let p_sub_1 = prove_eq self a1 a2 in
                 let p_sub_2 = prove_eq self b1 b2 in
                 Proof.congr p_sub_1 p_sub_2
-              | None, _ | _, None -> assert false
+              | Some (S_eq (a1,b1)), Some (S_eq (a2,b2)) ->
+                let p_sub_1 = prove_eq self a1 a2 in
+                let p_sub_2 = prove_eq self b1 b2 in
+                Proof.congr p_sub_1 p_sub_2
+              | _ -> assert false
             end
           | Exp_eq (e,n1,n2) ->
             let p = prove_eq self n1 n2 in
@@ -221,10 +248,6 @@ and explain_along_ (self:t) (n0:node) (parent:node) : Proof.t =
    TODO: also add some tests, like [(a=b), (\x. f(a,x)) c = f(a,c) |- (\x. f(b,x)) =b]
 *)
 
-
-let[@inline] canon_sig (s:signature) : signature =
-  match s with
-  | S_app (n1, n2) -> S_app (find n1, find n2)
 
 (* iterate on all nodes in the class of [n0] *)
 let iter_class_ (n0:node) f : unit =

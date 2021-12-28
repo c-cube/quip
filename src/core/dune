@@ -4,5 +4,6 @@
   (public_name quip.core)
   (synopsis "Core library for Quip")
   (libraries smtlib-utils trustee.core containers logs pp_loc
+             mtime mtime.clock.os
              ppx_deriving.runtime)
   (preprocess (pps ppx_deriving.std)))

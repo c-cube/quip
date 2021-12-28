@@ -218,10 +218,12 @@ type syn =
   [@@deriving show, eq]
 
 let parse_string ctx ~syn s : _ result =
+  Profile.with_ "problem.parse-string" @@ fun () ->
   match syn with
   | Smt2 -> Smtlib.parse_string ctx s
 
 let parse_file ctx filename : _ result =
+  Profile.with_ "problem.parse-file" @@ fun () ->
   match Filename.extension filename with
   | ".smt2" ->
     Smtlib.parse_file ctx filename

@@ -339,6 +339,7 @@ let add_lit (self:t) (lit:Lit.t) : unit =
   Vec.push self.to_merge (Merge (n, n_bool, Exp_merge lit))
 
 let is_absurd (ctx:K.ctx) ~true_ ~false_ (lits:Lit.t list) : Proof.t option =
+  Profile.with_ "cc.is-absurd" @@ fun () ->
   Log.debug (fun k->k"(@[cc.is-absurd@ %a@])" (pp_l Lit.pp) lits);
   let self = create ctx ~true_ ~false_ in
   List.iter (add_lit self) lits;

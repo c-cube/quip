@@ -11,6 +11,7 @@
     (smtlib-utils (>= "0.3"))
     (ounit2 :with-test)
     logs
+    mtime
     (ocaml (>= "4.08"))
     pp_loc
     ))

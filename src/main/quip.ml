@@ -45,6 +45,9 @@ let main ~quiet ~problem proof : 'a =
 
 let () =
   Printexc.record_backtrace true;
+  TEF.setup();
+  at_exit TEF.teardown;
+
   let files = ref [] in
   let color = ref true in
   let quiet = ref false in

@@ -270,7 +270,9 @@ module Make(A : ARG) : S = struct
 
   (* check [p], returns its clause. *)
   and check_proof_rec_ (p: Ast.Proof.t) : Clause.t =
+    Profile.with_ "check-proof-rec" @@ fun () ->
     Log.debug (fun k->k"(@[check-proof-rec@ %a@])" P.pp p);
+
     let loc = P.loc p in
     begin match P.view p with
       | P.Sorry ->
@@ -300,6 +302,7 @@ module Make(A : ARG) : S = struct
 
       | P.Composite {assumptions; steps} ->
         (* composite proof: check each step *)
+        Profile.with_ "check.composite" @@ fun () ->
 
         (* locally push [name -> {lit}] for each assumption *)
         let asms = List.map (fun (name,lit) -> name, conv_lit lit) assumptions in
@@ -333,6 +336,8 @@ module Make(A : ARG) : S = struct
         end
 
       | P.CC_lemma_imply (ps, t, u) ->
+        Profile.with_ "check.cc-lemma-imply" @@ fun () ->
+
         (* prove [ps |- t=u] *)
         let t = conv_term t in
         let u = conv_term u in
@@ -365,6 +370,7 @@ module Make(A : ARG) : S = struct
         )
 
       | P.CC_lemma c ->
+        Profile.with_ "check.cc-lemma" @@ fun () ->
         let c = conv_clause c in
 
         (* check that [¬C] is absurd *)
@@ -386,6 +392,8 @@ module Make(A : ARG) : S = struct
         )
 
       | P.Paramod1 { rw_with; p=passive } ->
+        Profile.with_ "check.paramod1" @@ fun () ->
+
         let rw_with = check_proof_rec rw_with in
         let passive = check_proof_rec passive in
         Log.debug (fun k->k"(@[paramod1@ :rw-with %a@ :p %a@])"
@@ -436,6 +444,8 @@ module Make(A : ARG) : S = struct
         end
 
       | P.Clause_rw { res; c0; using } ->
+        Profile.with_ "check.clause-rw" @@ fun () ->
+
         let res = conv_clause res in
         let c0 = check_proof_rec c0 in
         let using = List.map check_proof_rec using in
@@ -510,42 +520,47 @@ module Make(A : ARG) : S = struct
       | P.Rup_res (c, hyps) ->
         Log.debug (fun k->k"check step %a" P.pp p);
 
-        (* instantiate RUP checker *)
-        let module D = Rup_check.Make(struct
-            include K.Expr
-            let dummy = st.dummy_e
-          end) in
-
         let c = conv_clause c in
         let hyps = List.map check_proof_rec hyps in
 
-        let cstore = D.Clause.create() in
-        let checker = D.Checker.create cstore in
+        let ok =
+          Profile.with_ "check.rup-res" @@ fun () ->
 
-        let lit_to_atom (lit:Lit.t) =
-          let t = Lit.atom lit in
-          let sign = Lit.sign lit in
-          D.Atom.make ~sign t
+          (* instantiate RUP checker *)
+          let module D = Rup_check.Make(struct
+              include K.Expr
+              let dummy = st.dummy_e
+            end) in
+
+          let cstore = D.Clause.create() in
+          let checker = D.Checker.create cstore in
+
+          let lit_to_atom (lit:Lit.t) =
+            let t = Lit.atom lit in
+            let sign = Lit.sign lit in
+            D.Atom.make ~sign t
+          in
+
+          List.iter
+            (fun hyp ->
+               let c =
+                 Clause.lits hyp
+                 |> Iter.map lit_to_atom
+                 |> Iter.to_rev_list
+               in
+               D.Checker.add_clause_l checker c)
+            hyps;
+
+          (* the goal clause [c] *)
+          let goal =
+            Clause.lits c
+            |> Iter.map lit_to_atom
+            |> D.Clause.of_iter cstore
+          in
+
+          D.Checker.is_valid_drup checker goal
         in
 
-        List.iter
-          (fun hyp ->
-             let c =
-               Clause.lits hyp
-               |> Iter.map lit_to_atom
-               |> Iter.to_rev_list
-             in
-             D.Checker.add_clause_l checker c)
-          hyps;
-
-        (* the goal clause [c] *)
-        let goal =
-          Clause.lits c
-          |> Iter.map lit_to_atom
-          |> D.Clause.of_iter cstore
-        in
-
-        let ok = D.Checker.is_valid_drup checker goal in
         Log.debug (fun k->k"(@[RUP-check.res@ :res %B@ :for %a@ :hyps %a@])"
                       ok Clause.pp c (Fmt.Dump.list Clause.pp) hyps);
         if ok then c else (
@@ -558,12 +573,16 @@ module Make(A : ARG) : S = struct
         )
 
       | P.Res {pivot; p1; p2} ->
+        Profile.with_ "check.res" @@ fun () ->
+
         let pivot = conv_term pivot in
         let c1 = check_proof_rec p1 in
         let c2 = check_proof_rec p2 in
         res_on_ ~loc ~pivot c1 c2
 
       | P.Res1 {p1; p2} ->
+        Profile.with_ "check.res1" @@ fun () ->
+
         let c1 = check_proof_rec p1 in
         let c2 = check_proof_rec p2 in
         begin match Clause.as_singleton c1, Clause.as_singleton c2 with
@@ -578,17 +597,22 @@ module Make(A : ARG) : S = struct
         end
 
       | P.Subst (subst, p1) ->
+        Profile.with_ "check.subst" @@ fun () ->
+
         let p1 = check_proof_rec p1 in
         let subst = conv_subst subst in
         Clause.subst ctx ~recursive:false p1 subst
 
       | P.Hres (init, steps) ->
+        Profile.with_ "check.hres" @@ fun () ->
 
         let init = check_proof_rec init in
         let c = List.fold_left check_hres_step_ init steps in
         c
 
       | P.Bool_c (name, ts) ->
+        Profile.with_ "check.bool-c" @@ fun () ->
+
         let ts = List.map conv_term ts in
         check_bool_c ~loc p name ts
 
@@ -868,6 +892,7 @@ module Make(A : ARG) : S = struct
       )
 
   and check_hres_step_ (c1: Clause.t) (step:_ P.hres_step) : Clause.t =
+    Profile.with_ "check-hres-step" @@ fun () ->
     let loc = step.loc in
     begin match step.view with
       | P.R {pivot; p} ->
@@ -914,6 +939,7 @@ module Make(A : ARG) : S = struct
       None
 
     | P.S_step_c { name; res; proof } ->
+      Profile.with_ "check-stepc" @@ fun () ->
 
       (* first, convert clause declared with this step.
          It is named [name] in [proof]. *)
@@ -976,6 +1002,7 @@ module Make(A : ARG) : S = struct
     end
 
   let check_proof p =
+    Profile.with_ "check-proof" @@ fun () ->
     Log.debug (fun k->k"checking proof");
     begin
       try

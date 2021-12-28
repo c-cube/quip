@@ -316,6 +316,7 @@ module Proof = struct
   end
 
   let parse_lexbuf_ ~input ~filename lexbuf : P.t =
+    Profile.with_ "parse-proof" @@ fun () ->
     let module P = Parse(struct
         let filename=filename
         let input = input

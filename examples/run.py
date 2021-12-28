@@ -9,6 +9,7 @@ static_files = [
 
 proof_dirs = [
     'out-proofs-2021-12-27T20:48',
+    'out-proofs-2021-12-28T16:32',
 ]
 
 def green(s: str) -> str:

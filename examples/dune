@@ -1,18 +1,1 @@
 
-(rule
-  (alias runtest)
-  (deps (:pb NEQ004_size4.smt2) (:proof NEQ004_size4.quip))
-  (locks /test)
-  (action (run ../src/main/quip.exe --problem %{pb} %{proof} -q)))
-
-(rule
-  (alias runtest)
-  (deps (:pb eq_diamond10.smt2) (:proof eq_diamond10.quip))
-  (locks /test)
-  (action (run ../src/main/quip.exe --problem %{pb} %{proof} -q)))
-
-(rule
-  (alias runtest)
-  (deps (:proof eq_diamond10_sc.quip))
-  (locks /test)
-  (action (run ../src/main/quip.exe %{proof} -q)))

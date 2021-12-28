@@ -17,6 +17,7 @@
     (ounit2 :with-test)
     logs
     mtime
+    cmdliner
     (iter (>= "1.0"))
     (ocaml (>= "4.08"))
     pp_loc

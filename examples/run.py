@@ -33,7 +33,7 @@ def gen_files(curdir: str) -> Iterator[Tuple[str, str]]:
                 yield (proof, pb)
 
 def check(file: str, pb: str) -> bool:
-    p = subprocess.Popen(['./quip.sh', file, f'--problem={pb}'], stdout=subprocess.PIPE)
+    p = subprocess.Popen(['./quip.sh', 'check', file, f'--problem={pb}'], stdout=subprocess.PIPE)
     errcode = p.wait()
     #if p.stdout is not None:
     #    out = p.stdout.read()

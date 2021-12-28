@@ -10,11 +10,3 @@
              smtlib-utils containers unix cmdliner
              ppx_deriving.runtime)
   (preprocess (pps ppx_deriving.std)))
-
-(executable
-  (name quip_dot)
-  (public_name quip-dot)
-  (modules quip_dot)
-  (libraries quip.core quip.util
-             smtlib-utils containers ppx_deriving.runtime)
-  (preprocess (pps ppx_deriving.std)))

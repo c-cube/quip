@@ -128,6 +128,38 @@ module Make() = struct
          (cl (- (p1 (f1 a))) (- (= (f1 b) a)) (- (= c a)) (+ (p1 b)))
          (ccl (@ lemma)))
        )))|};
+    (* big CC lemma *)
+    test_proof ~expect:true __LINE__ {|
+      (declare-sort U 0)
+      (declare-fun c2 () U)
+      (declare-fun c3 () U)
+      (declare-fun c4 () U)
+      (declare-fun f1 (U U) U)
+      (declare-fun c_0 () U)
+      (declare-fun c_4 () U)
+      (declare-fun c_1 () U)
+      (declare-fun c_2 () U)
+      (declare-fun c_3 () U)
+      |}
+      {|
+      (quip 1 (steps () (
+      (stepc lemma
+      (cl
+        (= (f1 c2 (f1 c3 (f1 c2 c4))) (f1 (f1 (f1 c4 c3) c3) c2))
+        (not (= c4 c_3))
+        (not (= c3 c_2))
+        (not (= c2 c_1))
+        (not (= (f1 c_3 c_3) c_0))
+        (not (= (f1 c_3 c_2) c_1))
+        (not (= (f1 c_3 c_1) c_0))
+        (not (= (f1 c_3 c_0) c_1))
+        (not (= (f1 c_2 c_0) c_1))
+        (not (= (f1 c_1 c_2) c_1))
+        (not (= (f1 (f1 c_3 (f1 c_3 (f1 c_3 c_3))) (f1 c_3 (f1 c_3 c_2))) c_3))
+        (not (= (f1 (f1 c_3 (f1 c_3 (f1 c_0 c_0))) (f1 c_0 (f1 c_3 c_3))) c_0))
+      )
+      (ccl (@ lemma))))))
+      |};
     (* basic subst *)
     test_proof ~expect:true __LINE__ prelude0
      {|(quip 1 (steps () (

@@ -288,6 +288,9 @@ module Proof = struct
         let cl = lits_of_sexp cl in
         let sub_pr = p_of_sexp sub_pr in
         P.stepc ~loc ~name cl sub_pr
+      | List [{s=Atom "step";_}; {s=Atom name;_}; sub_pr] ->
+        let sub_pr = p_of_sexp sub_pr in
+        P.step ~loc ~name sub_pr
       | List [{s=Atom "ty_decl";_}; {s=Atom name;loc=_}; {s=Atom n;loc=loc_n}] ->
         let n = try int_of_string n
           with _ -> Error.failf ~loc:loc_n "expect arity (a number)" in

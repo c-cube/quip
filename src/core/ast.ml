@@ -171,6 +171,10 @@ module Proof = struct
         res: term list; (* result of [proof] *)
         proof: 'proof; (* sub-proof *)
       }
+    | S_step_anon of {
+        name: string;
+        proof: 'proof;
+      }
     | S_define_t of string * term (* [const := t] *)
     | S_declare_ty_const of {
         name: string;
@@ -253,6 +257,7 @@ module Proof = struct
   let[@inline] mkcs_ ~loc view : _ composite_step = {loc;view}
 
   let stepc ~loc ~name res proof : _ composite_step = mkcs_ ~loc @@ S_step_c {proof;name;res}
+  let step ~loc ~name proof : _ composite_step = mkcs_ ~loc @@ S_step_anon {proof;name}
   let deft ~loc c rhs : _ composite_step = mkcs_ ~loc @@ S_define_t (c,rhs)
   let decl_const ~loc name ty : _ composite_step = mkcs_ ~loc @@ S_declare_const {name;ty}
   let decl_ty_const ~loc name arity : _ composite_step =

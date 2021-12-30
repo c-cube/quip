@@ -213,6 +213,16 @@ module Dot = struct
     | S_declare_const _ -> ()
     | S_define_const { name; ty=_; rhs } ->
       Hashtbl.replace state.terms name rhs
+    | S_step_anon {name; proof} ->
+      if not (Hashtbl.mem state.printed name) then (
+        Hashtbl.add state.printed name ();
+
+        add_linef state
+          {|@[%s [label="%s",shape="box",fillcolor="%s",style="filled"]@]|}
+          name name "yellow";
+        let p = pp_proof_itself state proof in
+        add_linef state {|@[%s -> %s [label="proof(%s)"]@]|} name p name;
+      )
     | S_step_c {name; res; proof} ->
       if not (Hashtbl.mem state.printed name) then (
         let res = Array.of_list res |> Array.map (norm_term state) in

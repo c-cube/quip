@@ -132,6 +132,10 @@ module Proof : sig
         res: term list; (* result of [proof] *)
         proof: 'proof; (* sub-proof *)
       }
+    | S_step_anon of {
+        name: string;
+        proof: 'proof;
+      }
     | S_define_t of string * term (* [const := t] *)
     | S_declare_ty_const of {
         name: string;
@@ -202,6 +206,7 @@ module Proof : sig
   (** Unit paramodulation *)
 
   val stepc : loc:Loc.t -> name:string -> term list -> t -> t composite_step
+  val step : loc:Loc.t -> name:string -> t -> t composite_step
 
   val deft : loc:Loc.t -> string -> term -> t composite_step (** define a (new) atomic term *)
 

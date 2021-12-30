@@ -110,7 +110,7 @@ module Make(A : ARG) : S = struct
   end
 
   type st = {
-    checked: (string, Clause.t) Hashtbl.t;
+    checked: (string, (Clause.t, Error.t) result) Hashtbl.t;
     named_terms: (string, K.expr) Hashtbl.t;
     named_clauses: (string, Clause.t) Hashtbl.t;
     errors: Error_list.t;
@@ -316,7 +316,7 @@ module Make(A : ARG) : S = struct
         let asms = List.map (fun (name,lit) -> name, conv_lit lit) assumptions in
         List.iter
           (fun (name, lit) ->
-            Hashtbl.add st.checked name (Clause.singleton lit))
+            Hashtbl.add st.checked name (Ok (Clause.singleton lit)))
           asms;
 
         let r =
@@ -338,7 +338,9 @@ module Make(A : ARG) : S = struct
 
       | P.Named name ->
         begin match Hashtbl.find_opt st.checked name with
-          | Some c -> c
+          | Some (Ok c) -> c
+          | Some (Error err) ->
+            Error.raise (Error.wrapf ~loc "dereferencing '%s'" name @@ err)
           | None ->
             Error.failf ~loc "cannot find step with name '%s'" name
         end
@@ -940,11 +942,31 @@ module Make(A : ARG) : S = struct
 
   and check_composite_step_ (step: _ Ast.Proof.composite_step) : Clause.t option =
     let loc = step.loc in
+    (* TODO: progress bar *)
+
     begin match step.view with
     | P.S_define_t (name, u) ->
       let u = conv_term u in
       Hashtbl.add st.named_terms name u;
       None
+
+    | P.S_step_anon { name; proof } ->
+      Profile.with_ "check-step" @@ fun () ->
+
+      let@@ () = Error.guard (Error.wrapf ~loc "checking step `%s`" name) in
+
+      begin
+        try
+          let c = check_proof_rec proof in
+          Log.debug (fun k->k"step '%s'@ yields %a" name Clause.pp c);
+          Hashtbl.add st.checked name (Ok c);
+
+          Some c
+        with
+        | Error.E err as exn ->
+          Hashtbl.add st.checked name (Error err);
+          raise exn
+      end
 
     | P.S_step_c { name; res; proof } ->
       Profile.with_ "check-stepc" @@ fun () ->
@@ -954,7 +976,7 @@ module Make(A : ARG) : S = struct
       let expected_c = conv_lits res in
       Hashtbl.add st.named_clauses name expected_c;
 
-      Log.info (fun k->k"check step '%s'" name);
+      Log.debug (fun k->k"check step '%s'" name);
 
       (* check proof, catching errors. We know the expected result
          of this step. *)
@@ -981,7 +1003,7 @@ module Make(A : ARG) : S = struct
 
       (* named clause goes out of scope *)
       Hashtbl.remove st.named_clauses name;
-      Hashtbl.add st.checked name expected_c;
+      Hashtbl.add st.checked name (Ok expected_c);
 
       Some expected_c
 

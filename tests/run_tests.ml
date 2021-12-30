@@ -35,8 +35,8 @@ module Make() = struct
   let test_proof ~expect line pb proof =
     mk_test_ line @@ fun _ctx ->
     let pb = parse_pb_str line pb in
-    let proof = parse_proof_str line proof in
-    let checker = Check.create ctx pb in
+    let proof, ast_ctx = parse_proof_str line proof in
+    let checker = Check.create ctx pb ast_ctx in
     let ok, _, errs, _stats = Check.check_proof checker proof in
     Logs.info (fun k->k"line %d: res %b, stats %a@." line ok Check.pp_stats _stats);
     if expect && errs<> [] then (

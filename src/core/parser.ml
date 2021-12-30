@@ -396,34 +396,39 @@ module Proof = struct
             let pstep () =
               let loc0 = loc() in
               expect ~msg:"hres_step" LIST_OPEN;
-              match cur_consume() with
-              | ATOM "p1" ->
-                let sub_p = parse_proof () in
-                let loc = loc_since loc0 in
-                P.p1 ~loc sub_p
+              let res =
+                match cur_consume() with
+                | ATOM "p1" ->
+                  let sub_p = parse_proof () in
+                  let loc = loc_since loc0 in
+                  P.p1 ~loc sub_p
 
-              | ATOM "p" ->
-                let lhs = parse_term() in
-                let rhs = parse_term() in
-                let sub_p = parse_proof() in
-                let loc = loc_since loc0 in
-                P.p ~loc sub_p ~lhs ~rhs
+                | ATOM "p" ->
+                  let lhs = parse_term() in
+                  let rhs = parse_term() in
+                  let sub_p = parse_proof() in
+                  let loc = loc_since loc0 in
+                  P.p ~loc sub_p ~lhs ~rhs
 
-              | ATOM "r1" ->
-                let sub_p = parse_proof() in
-                let loc = loc_since loc0 in
-                P.r1 ~loc sub_p
+                | ATOM "r1" ->
+                  let sub_p = parse_proof() in
+                  let loc = loc_since loc0 in
+                  P.r1 ~loc sub_p
 
-              | ATOM "r" ->
-                let pivot = parse_term () in
-                let sub_p = parse_proof() in
-                let loc = loc_since loc0 in
-                P.r ~loc ~pivot sub_p
+                | ATOM "r" ->
+                  let pivot = parse_term () in
+                  let sub_p = parse_proof() in
+                  let loc = loc_since loc0 in
+                  P.r ~loc ~pivot sub_p
 
-              | _t ->
-                Error.failf ~loc:(trsloc loc0)
-                  "unexpected %a, expected a step for `hres` (hint: p1|r1|p|r)"
-                  pp_token _t
+                | _t ->
+                  Error.failf ~loc:(trsloc loc0)
+                    "unexpected %a, expected a step for `hres` (hint: p1|r1|p|r)"
+                    pp_token _t
+
+              in
+              expect ~msg:"ending hres_step" LIST_CLOSE;
+              res
             in
 
             let init = parse_proof() in

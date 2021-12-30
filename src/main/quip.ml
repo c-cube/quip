@@ -72,7 +72,7 @@ module Check = struct
     let proof =
       let content = with_file_in proof CCIO.read_all in
       if not quiet then (
-        Log.info (fun k->k"proof size: %d bytes" (String.length content));
+        Log.app (fun k->k"proof size: %d bytes" (String.length content));
       );
       Parser.Proof.parse_string ~filename:proof content
     in

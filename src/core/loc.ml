@@ -138,13 +138,18 @@ let pp_l out (l:t list) : unit =
       (Pp_loc.pp ~max_lines:5 ~input) locs
   )
 
-let of_lexbuf ~input (lexbuf:Lexing.lexbuf) : t =
+let of_lexbuf' ~ctx (lexbuf:Lexing.lexbuf) : t =
   let open Lexing in
   let start = lexbuf.lex_start_p in
   let stop = lexbuf.lex_curr_p in
-  let file = start.pos_fname in
   let tr_pos p = P.make ~line:p.pos_lnum ~col:(p.pos_cnum - p.pos_bol + 1) in
-  {ctx={file; input}; start=tr_pos start; stop=tr_pos stop}
+  {ctx; start=tr_pos start; stop=tr_pos stop}
+
+let of_lexbuf ~input (lexbuf:Lexing.lexbuf) : t =
+  let open Lexing in
+  let file = lexbuf.lex_start_p.pos_fname in
+  let ctx={file; input} in
+  of_lexbuf' ~ctx lexbuf
 
 let union a b =
   {start=Position.min a.start b.start;

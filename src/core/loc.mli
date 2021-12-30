@@ -26,6 +26,7 @@ type t = {
 val mk : ctx:ctx -> int -> int -> int -> int -> t
 val mk_pair : ctx:ctx -> int*int -> int*int -> t
 
+val of_lexbuf' : ctx:ctx -> Lexing.lexbuf -> t
 val of_lexbuf : input:Input.t -> Lexing.lexbuf -> t
 
 val pp_compact : t Fmt.printer

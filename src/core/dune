@@ -7,3 +7,5 @@
              mtime mtime.clock.os threads iter
              ppx_deriving.runtime)
   (preprocess (pps ppx_deriving.std)))
+
+(ocamllex (modules sexp_lex))

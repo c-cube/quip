@@ -7,93 +7,193 @@ module Proof = struct
   module P = A.Proof
   module T = A.Term
 
-  type sexp = {
-    loc: Loc.t;
-    s: sexp_view;
-  }
-  and sexp_view =
-    | Atom of string
-    | List of sexp list
-
   module type ARG = sig
     val filename : string
     val input : Loc.Input.t
+    val str : string
+  end
+
+  type token = Sexp_lex.token =
+    | ATOM of string
+    | LIST_OPEN
+    | LIST_CLOSE
+    | EOI
+  [@@deriving show]
+
+  module Make_parser(PA:ARG)() : sig
+    val loc : unit -> Loc.t
+    val loc_since : Loc.t -> Loc.t
+    val cur : unit -> token
+    val cur_consume : unit -> token
+    val atom : msg:string -> unit -> string
+    val consume: unit -> unit
+    val expect : ?msg:string -> token -> unit
+  end = struct
+    let lexbuf = Lexing.from_string ~with_positions:true PA.str
+    let() = Loc.set_file lexbuf PA.filename
+    let ctx = {Loc.input=PA.input; file=PA.filename}
+    let make_loc () = Loc.of_lexbuf' ~ctx lexbuf
+
+    let cur_ = ref (Sexp_lex.token lexbuf)
+    let loc_ = ref (make_loc())
+
+    let[@inline] cur() = !cur_
+    let[@inline] loc() = !loc_
+    let loc_since l0 = Loc.union l0 (loc())
+    let consume() =
+      let t = Sexp_lex.token lexbuf in
+      cur_ := t;
+      loc_ := make_loc();
+      ()
+
+    let cur_consume() = let t = cur() in consume(); t
+
+    let[@inline] atom ~msg () = match cur() with
+      | ATOM s -> consume(); s
+      | t ->
+        Error.failf ~loc:(loc()) "expected %s (<atom>), got %a" msg pp_token t
+
+    let expect ?msg tok =
+      let t = cur() in
+      if t = tok then consume()
+      else (
+        let loc=loc() in
+        match msg with
+        | None ->
+          Error.failf ~loc "expected %a, got %a" pp_token tok pp_token t
+        | Some msg ->
+          Error.failf ~loc "expected %s@ starting with %a,@ got %a" msg pp_token tok pp_token t
+      )
   end
 
   (* custom sexp parser *)
   module Parse(PA : ARG)() = struct
-    module S_arg = struct
-      type t = sexp
-      type loc = Loc.t
-      let ctx = {Loc.input=PA.input; file=PA.filename}
-      let make_loc = Some (fun (x1,x2) (x3,x4) _ ->
-          Loc.mk ~ctx x1 x2 x3 x4)
-      let atom_with_loc ~loc s = {loc; s=Atom s}
-      let list_with_loc ~loc l = {loc; s=List l}
-      let atom = atom_with_loc ~loc:Loc.none
-      let list = list_with_loc ~loc:Loc.none
-      let match_ self ~atom ~list =
-        match self.s with
-        | Atom s -> atom s
-        | List l -> list l
-    end
+    open Make_parser(PA)()
 
-    include CCSexp.Make(S_arg)
+    (** [list_args p] parses instances of [p], followed by ')',
+        but does not consume ')' *)
+    let list_args p =
+      let rec loop acc = match cur() with
+        | LIST_CLOSE -> List.rev acc
+        | _ ->
+          let x = p() in
+          loop (x::acc)
+      in loop []
 
-    let rec ty_of_sexp s : A.Ty.t =
-      let loc = s.loc in
-      match s.s with
-      | Atom name -> A.Ty.constr ~loc name []
-      | List ({s=Atom "->";_} :: (_::_ as args)) ->
-        let rargs = List.rev_map ty_of_sexp args in
-        begin match rargs with
-          | ret :: l -> A.Ty.arrow ~loc (List.rev l) ret
-          | [] -> assert false
-        end
-      | List ({s=Atom name;_} :: args) ->
-        let args = List.map ty_of_sexp args in
-        A.Ty.constr ~loc name args
-      | _ ->
-        Error.failf ~loc "expected a type"
+    (** [list_of p] parses '(', many [p], then ')' *)
+    let list_of p =
+      expect LIST_OPEN;
+      let l = list_args p in
+      expect LIST_CLOSE;
+      l
+
+    let rec parse_ty () : A.Ty.t =
+      let loc = loc() in
+      match cur_consume() with
+      | ATOM name -> A.Ty.constr ~loc name []
+      | LIST_OPEN ->
+        let res =
+          match cur_consume() with
+          | ATOM "->" ->
+            let args = list_args parse_ty in
+            begin match List.rev args with
+              | ret :: l -> A.Ty.arrow ~loc (List.rev l) ret
+              | [] -> assert false
+            end
+          | ATOM name ->
+            let args = list_args parse_ty in
+            A.Ty.constr ~loc name args
+          | _ -> Error.failf ~loc "expected atom"
+        in
+        expect LIST_CLOSE;
+        res
+      | _t ->
+        Error.failf ~loc "expected a type, got %a" pp_token _t
 
     (** Parse term *)
-    let t_of_sexp (sexp:sexp) : T.t =
-      let rec loop s : T.t =
-        let loc = s.loc in
-        match s.s with
-        | Atom name -> T.const ~loc name
-        | List [{s=Atom "=";_}; a; b] -> T.eq ~loc (loop a) (loop b)
-        | List [{s=Atom "not";_}; a] -> T.not ~loc (loop a)
+    let rec parse_term () : T.t =
+      let loc0 = loc() in
+      match cur_consume () with
+      | ATOM name ->
+        let loc = loc_since loc0 in
+        T.const ~loc name
+      | LIST_OPEN ->
+        let res =
+          match cur_consume() with
+          | ATOM "=" ->
+            let a = parse_term () in
+            let b = parse_term () in
 
-        | List [{s=Atom "?";_}; {s=Atom name;_}; ty] ->
-          let ty = ty_of_sexp ty in
-          T.var ~loc (A.Var.make ~ty:(Some ty) name)
+            let loc = loc_since loc0 in
+            T.eq ~loc a b
 
-        | List [{s=Atom "let";_}; {s=List l;_}; bod] ->
-          let l = List.map (function
-              | {s=List [{s=Atom v;_}; t];_} -> A.Var.make ~ty:() v, loop t
-              | _ -> Error.failf ~loc "expected `(<var> <term>)`")
-              l
-          in
-          T.let_ ~loc l @@ loop bod
+          | ATOM "not" ->
+            let a = parse_term () in
 
-        | List [{s=Atom ("@" | "ref");_}; {s=Atom name;_}] ->
-          T.ref ~loc name
+            let loc = loc_since loc0 in
+            T.not ~loc a
 
-        | List [{s=Atom "ite";_}; a; b; c] ->
-          T.ite ~loc (loop a) (loop b) (loop c)
+          | ATOM "?" ->
+            let name = atom ~msg:"name" () in
+            let ty = parse_ty() in
 
-        | List [{s=Atom "lambda";_}; {s=List[{s=Atom v; _}; ty];_}; bod] ->
-          let v = A.Var.make ~ty:(ty_of_sexp ty) v in
-          T.fun_ ~loc v (loop bod)
+            let loc = loc_since loc0 in
+            T.var ~loc (A.Var.make ~ty:(Some ty) name)
 
-        | List [{s=List [{s=Atom "_";_}; {s=Atom "is";_}; {s=Atom c;_}];_}; u] ->
-          let u = loop u in
-          T.is_a ~loc c u
+          | ATOM "let" ->
+            let p_pair () =
+              expect ~msg:"pair (<variable> <term>)" LIST_OPEN;
+              let v = atom ~msg:"variable" () in
+              let t = parse_term() in
+              expect ~msg:"close let binding" LIST_CLOSE;
+              A.Var.make ~ty:() v, t
+            in
+            let l = list_of p_pair in
+            let bod = parse_term () in
 
-        | List ({s=Atom f;_} :: args) ->
-          let args = List.map loop args in
-          T.app_name ~loc f args
+            let loc = loc_since loc0 in
+            T.let_ ~loc l bod
+
+          | ATOM ("@" | "ref") ->
+            let name = atom ~msg:"name of term" () in
+
+            let loc = loc_since loc0 in
+            T.ref ~loc name
+
+          | ATOM "ite" ->
+            let a = parse_term () in
+            let b = parse_term () in
+            let c = parse_term () in
+
+            let loc = loc_since loc0 in
+            T.ite ~loc a b c
+
+          | ATOM "lambda" ->
+            expect ~msg:"lambda argument list" LIST_OPEN;
+            let v = atom ~msg:"variable"() in
+            let ty = parse_ty() in
+            let v = A.Var.make ~ty v in
+            expect ~msg:"close lambda argument list" LIST_CLOSE;
+            let bod = parse_term () in
+
+            let loc = loc_since loc0 in
+            T.fun_ ~loc v bod
+
+          | LIST_OPEN ->
+            expect ~msg:"(_ is <cstor>)" (ATOM "_");
+            expect (ATOM "is");
+            let c = atom ~msg:"constructor" () in
+            expect LIST_CLOSE;
+            let u = parse_term () in
+
+            let loc = loc_since loc0 in
+            T.is_a ~loc c u
+
+          | ATOM f ->
+            let args = list_args parse_term in
+
+            let loc = loc_since loc0 in
+            T.app_name ~loc f args
 
         (*
         | List [{s=Atom "!";_}; a; {s=Atom ":named";_}; {s=Atom name;_}] ->
@@ -104,247 +204,368 @@ module Proof = struct
           parse_errorf s "unimplemented `!`" (* TODO: named expr from input problem? *)
         *)
 
-        | _ -> Error.failf ~loc "expected a term"
-      in loop sexp
+          | _t -> Error.failf ~loc:loc0 "expected a term, got %a" pp_token _t
+        in
+        expect LIST_CLOSE;
+        res
+      | _t -> Error.failf ~loc:loc0 "unexpected %a, expected a term" pp_token _t
 
     (** Parse substitution *)
-    let s_of_sexp (sexp:sexp) : A.Subst.t =
-      let rec of_l = function
-        | [] -> []
-        | {s=Atom v;_} :: t :: tl ->
-          let v = Ast.Var.make ~ty:() v in
-          let t = t_of_sexp t in
-          (v,t) :: of_l tl
-        | {loc;_} :: _ :: _ ->
-          Error.failf ~loc "expected a variable"
-        | [{loc;_}] ->
-          Error.failf ~loc "substitution must have even number of arguments"
-      in
-      match sexp.s with
-      | List l -> of_l l
-      | Atom _ ->
-        Error.failf ~loc:sexp.loc "expected substitution of shape `(<var> <term> …)`"
+    let parse_subst () : A.Subst.t =
+      let loc0 = loc() in
+      match cur_consume() with
+      | LIST_OPEN ->
+        let rec loop acc = match cur() with
+          | LIST_CLOSE -> consume(); List.rev acc
+          | _ ->
+            let v = atom ~msg:"variable" () in
+            let v = Ast.Var.make ~ty:() v in
+            let t = parse_term () in
+            loop ((v,t) :: acc)
+        in
+        loop []
 
-    let lits_of_sexp s : A.term list =
-      let loc = s.loc in
-      match s.s with
-      | List ({s=Atom "cl";_} :: lits) -> List.map t_of_sexp lits
-      | _ -> Error.failf ~loc "expected a clause `(cl t1 t2 … tn)`"
+      | _t ->
+        Error.failf ~loc:loc0
+          "unexpected %a, expected substitution of shape `(<var> <term> …)`"
+          pp_token _t
+
+    let parse_lits () : A.term list =
+      expect ~msg:"clause (cl t1…tn)" LIST_OPEN;
+      expect (ATOM "cl");
+      let l = list_args parse_term in
+      expect ~msg:"closing clause" LIST_CLOSE;
+      l
 
     (** Parse clause *)
-    let cl_of_sexp (s:sexp) : A.clause =
-      let loc = s.loc in
-      match s.s with
-      | List [{s=Atom ("@"|"ref");_}; {s=Atom name;_}] ->
-        A.Clause.(mk ~loc @@ Clause_ref name)
-      | List ({s=Atom "cl";_} :: lits) ->
-        let c_lits = List.map t_of_sexp lits in
-        A.Clause.(mk ~loc @@ Clause c_lits)
-      | _ -> Error.failf ~loc "expected a clause `(cl t1 t2 … tn)` or `(@ <name>)`"
+    let parse_clause () : A.clause =
+      let loc0 = loc() in
+      expect ~msg:"clause (cl …) or (@ <name>)" LIST_OPEN;
+      let res =
+        match cur() with
+        | ATOM ("@" | "ref") ->
+          consume();
+          let name = atom ~msg:"name" () in
 
-    let asm_of_sexp s =
-      let loc = s.loc in
-      match s.s with
-      | List [{s=Atom name;_}; lit] ->
-        let lit = t_of_sexp lit in
-        name, lit
-      | _ -> Error.failf ~loc "expected an assumption `(<name> <lit>)`"
+          let loc = loc_since loc0 in
+          A.Clause.(mk ~loc @@ Clause_ref name)
+
+        | ATOM "cl" ->
+          consume();
+          let c_lits = list_args parse_term in
+
+          let loc = loc_since loc0 in
+          A.Clause.(mk ~loc @@ Clause c_lits)
+
+        | _t ->
+          Error.failf ~loc:loc0
+            "unexpected %a, expected a clause `(cl t1 t2 … tn)` or `(@ <name>)`"
+            pp_token _t
+      in
+      expect ~msg:"closing clause" LIST_CLOSE;
+      res
+
+    let parse_assumption() =
+      expect LIST_OPEN;
+      let name = atom ~msg:"name" () in
+      let lit = parse_term() in
+      expect LIST_CLOSE;
+      name, lit
 
     (** Parse proof *)
-    let rec p_of_sexp (s:sexp) : P.t =
-      let loc = s.loc in
-      match s.s with
-      | List [{s=Atom "steps";_}; {s=List asms;_}; {s=List steps;_}] ->
-        let assms = List.map asm_of_sexp asms in
-        let steps = List.map step_of_sexp steps in
-        P.composite_l ~loc ~assms steps
+    let rec parse_proof () : P.t =
+      let loc0 = loc() in
+      match cur_consume() with
+      | ATOM "t-ne-f" -> P.true_neq_false ~loc:loc0
+      | ATOM "t-is-t" -> P.true_is_true ~loc:loc0
 
-      | List [{s=Atom "with";_}; {s=List bs;_}; p1] ->
-        let bs = List.map (function
-            | {s=List [{s=Atom name;_}; t];_} ->
-              let t = t_of_sexp t in
+      | LIST_OPEN ->
+        let res =
+          match cur_consume() with
+          | ATOM "steps" ->
+            let assms = list_of parse_assumption in
+            let steps = list_of parse_step in
+
+            let loc = loc_since loc0 in
+            P.composite_l ~loc ~assms steps
+
+          | ATOM "with" ->
+            let parse_binding () =
+              expect ~msg:"(<name> <term>)" LIST_OPEN;
+              let name = atom ~msg:"variable" () in
+              let t = parse_term () in
+              expect LIST_CLOSE;
               name, t
-            | {loc;_} ->
-              Error.failf ~loc "expected pair `(<name> <term>)`")
-            bs
+            in
+
+            let bs = list_of parse_binding in
+            let p1 = parse_proof () in
+
+            let loc = loc_since loc0 in
+            P.with_ ~loc bs p1
+
+          | ATOM "ccl" ->
+            let cl = parse_clause() in
+
+            let loc = loc_since loc0 in
+            P.cc_lemma ~loc cl
+
+          | ATOM "ccli" ->
+            let prs = list_of parse_proof in
+            let t = parse_term () in
+            let u = parse_term () in
+
+            let loc = loc_since loc0 in
+            P.cc_imply_l ~loc prs t u
+
+          | ATOM "bool-c" ->
+            let name = atom ~msg:"name of rule" () in
+            let name_loc = loc() in
+            let ts = list_args parse_term in
+
+            let name = P.(match name with
+              | "and-i" -> And_i
+              | "and-e" -> And_e
+              | "or-i" -> Or_i
+              | "or-e" -> Or_e
+              | "not-i" -> Not_i
+              | "not-e" -> Not_e
+              | "imp-i" -> Imp_i
+              | "imp-e" -> Imp_e
+              | "xor-i" -> Xor_i
+              | "xor-e" -> Xor_e
+              | "eq-i" -> Eq_i
+              | "eq-e" -> Eq_e
+              | _ -> Error.failf ~loc:name_loc "unknown bool-c rule: '%s'" name
+            ) in
+
+            let loc = loc_since loc0 in
+            P.bool_c ~loc name ts
+
+          | ATOM "clause-rw" ->
+            let cl = parse_clause () in
+            let p = parse_proof () in
+            let using = list_of parse_proof in
+
+            let loc = loc_since loc0 in
+            P.clause_rw ~loc ~res:cl p ~using
+
+          | ATOM "rup" ->
+            let cl = parse_clause () in
+            let using = list_of parse_proof in
+
+            let loc = loc_since loc0 in
+            P.rup_res ~loc cl using
+
+          | ATOM "p1" ->
+            let rw_with = parse_proof () in
+            let p = parse_proof () in
+
+            let loc = loc_since loc0 in
+            P.paramod1 ~loc ~rw_with p
+
+          | ATOM "ite-true" ->
+            let t = parse_term() in
+            let loc = loc_since loc0 in
+            P.ite_true ~loc t
+
+          | ATOM "ite-false" ->
+            let t = parse_term() in
+            let loc = loc_since loc0 in
+            P.ite_false ~loc t
+
+          | ATOM "r" ->
+            let pivot = parse_term() in
+            let p1 = parse_proof() in
+            let p2 = parse_proof() in
+            let loc = loc_since loc0 in
+            P.res ~loc ~pivot p1 p2
+
+          | ATOM "r1" ->
+            let p1 = parse_proof() in
+            let p2 = parse_proof() in
+            let loc = loc_since loc0 in
+            P.res1 ~loc p1 p2
+
+          | ATOM "hres" ->
+
+            let pstep () =
+              let loc0 = loc() in
+              expect ~msg:"hres_step" LIST_OPEN;
+              match cur_consume() with
+              | ATOM "p1" ->
+                let sub_p = parse_proof () in
+                let loc = loc_since loc0 in
+                P.p1 ~loc sub_p
+
+              | ATOM "p" ->
+                let lhs = parse_term() in
+                let rhs = parse_term() in
+                let sub_p = parse_proof() in
+                let loc = loc_since loc0 in
+                P.p ~loc sub_p ~lhs ~rhs
+
+              | ATOM "r1" ->
+                let sub_p = parse_proof() in
+                let loc = loc_since loc0 in
+                P.r1 ~loc sub_p
+
+              | ATOM "r" ->
+                let pivot = parse_term () in
+                let sub_p = parse_proof() in
+                let loc = loc_since loc0 in
+                P.r ~loc ~pivot sub_p
+
+              | _t ->
+                Error.failf ~loc:loc0
+                  "unexpected %a, expected a step for `hres` (hint: p1|r1|p|r)"
+                  pp_token _t
+            in
+
+            let init = parse_proof() in
+            let steps = list_of pstep in
+            let loc = loc_since loc0 in
+            P.hres_l ~loc init steps
+
+          | ATOM "subst" ->
+            let subst = parse_subst() in
+            let p = parse_proof() in
+            let loc = loc_since loc0 in
+            P.subst ~loc subst p
+
+          | ATOM "assert" ->
+            let t = parse_term() in
+            let loc = loc_since loc0 in
+            P.assertion ~loc t
+
+          | ATOM "assert-c" ->
+            let cl = parse_clause() in
+            let loc = loc_since loc0 in
+            P.assertion_c ~loc cl
+
+          | ATOM "refl" ->
+            let t = parse_term() in
+            let loc = loc_since loc0 in
+            P.refl ~loc t
+
+          | ATOM ("@" | "ref") ->
+            let name = atom ~msg:"step name" () in
+            let loc = loc_since loc0 in
+            P.ref_by_name ~loc name
+
+          | _t ->
+            Error.failf ~loc:loc0 "unexpected %a, expected a proof"
+              pp_token _t
+
         in
-        let p1 = p_of_sexp p1 in
-        P.with_ ~loc bs p1
+        expect ~msg:"closing ')' for proof" LIST_CLOSE;
+        res
 
-      | List [{s=Atom "ccl";_}; cl] ->
-        let cl = cl_of_sexp cl in
-        P.cc_lemma ~loc cl
-
-      | List [{s=Atom "ccli";_}; {s=List prs;_}; t; u] ->
-        let t = t_of_sexp t in
-        let u = t_of_sexp u in
-        let prs = List.map p_of_sexp prs in
-        P.cc_imply_l ~loc prs t u
-
-      | List ({s=Atom "bool-c";_} :: {s=Atom name;loc=name_loc} :: ts) ->
-        let ts = List.map t_of_sexp ts in
-        let name = P.(match name with
-          | "and-i" -> And_i
-          | "and-e" -> And_e
-          | "or-i" -> Or_i
-          | "or-e" -> Or_e
-          | "not-i" -> Not_i
-          | "not-e" -> Not_e
-          | "imp-i" -> Imp_i
-          | "imp-e" -> Imp_e
-          | "xor-i" -> Xor_i
-          | "xor-e" -> Xor_e
-          | "eq-i" -> Eq_i
-          | "eq-e" -> Eq_e
-          | _ -> Error.failf ~loc:name_loc "unknown bool-c rule: '%s'" name
-        ) in
-        P.bool_c ~loc name ts
-
-      | List [{s=Atom "clause-rw";_}; cl; p; {s=List using;_}] ->
-        let cl = cl_of_sexp cl in
-        let p = p_of_sexp p in
-        let using = List.map p_of_sexp using in
-        P.clause_rw ~loc ~res:cl p ~using
-
-      | List [{s=Atom "rup";_}; cl; {s=List using;_}] ->
-        let cl = cl_of_sexp cl in
-        let using = List.map p_of_sexp using in
-        P.rup_res ~loc cl using
-
-      | List [{s=Atom "p1";_}; rw_with; p] ->
-        let rw_with = p_of_sexp rw_with in
-        let p = p_of_sexp p in
-        P.paramod1 ~loc ~rw_with p
-
-      | Atom "t-ne-f" -> P.true_neq_false ~loc
-      | Atom "t-is-t" -> P.true_is_true ~loc
-
-      | List [{s=Atom "ite-true";_}; t] ->
-        let t = t_of_sexp t in
-        P.ite_true ~loc t
-      | List [{s=Atom "ite-false";_}; t] ->
-        let t = t_of_sexp t in
-        P.ite_false ~loc t
-
-      | List [{s=Atom "r";_}; pivot; p1; p2] ->
-        let pivot = t_of_sexp pivot in
-        let p1 = p_of_sexp p1 in
-        let p2 = p_of_sexp p2 in
-        P.res ~loc ~pivot p1 p2
-
-      | List [{s=Atom "r1";_}; p1; p2] ->
-        let p1 = p_of_sexp p1 in
-        let p2 = p_of_sexp p2 in
-        P.res1 ~loc p1 p2
-
-      | List [{s=Atom "hres";_}; init; {s=List steps;_}] ->
-        let pstep s =
-          let loc = s.loc in
-          match s.s with
-          | List [{s=Atom "p1";_}; sub_p] -> P.p1 ~loc (p_of_sexp sub_p)
-          | List [{s=Atom "p";_}; lhs; rhs; sub_p] ->
-            let lhs = t_of_sexp lhs in
-            let rhs = t_of_sexp rhs in
-            let sub_p = p_of_sexp sub_p in
-            P.p ~loc sub_p ~lhs ~rhs
-          | List [{s=Atom "r1";_}; sub_p] -> P.r1 ~loc (p_of_sexp sub_p)
-          | List [{s=Atom "r";_}; pivot; sub_p] ->
-            let pivot = t_of_sexp pivot in
-            let sub_p = p_of_sexp sub_p in
-            P.r ~loc ~pivot sub_p
-          | _ ->
-            Error.failf ~loc "expected a step for `hres` (hint: p1|r1|p|r)"
-        in
-        let init = p_of_sexp init in
-        P.hres_l ~loc init (CCList.map pstep steps)
-
-      | List [{s=Atom "subst";_}; subst; p] ->
-        let subst = s_of_sexp subst in
-        let p = p_of_sexp p in
-        P.subst ~loc subst p
-
-      | List [{s=Atom "assert";_}; t] ->
-        P.assertion ~loc (t_of_sexp t)
-
-      | List [{s=Atom "assert-c";_}; c] ->
-        P.assertion_c ~loc (cl_of_sexp c)
-
-      | List [{s=Atom "refl";_}; t] ->
-        P.refl ~loc (t_of_sexp t)
-
-      | List [{s=Atom ("@" | "ref");_}; {s=Atom name;_}] ->
-        P.ref_by_name ~loc name
-
-      | _ -> Error.failf ~loc "expected a proof"
+      | _t ->
+        Error.failf ~loc:loc0
+          "unexpected %a, expected a proof" pp_token _t
 
     (** Parse a composite step *)
-    and step_of_sexp (s:sexp) : _ P.composite_step =
-      let loc = s.loc in
-      match s.s with
-      | List [{s=Atom "deft";_}; {s=Atom name;loc=_}; t] ->
-        let t = t_of_sexp t in
-        P.deft name ~loc t
-      | List [{s=Atom "stepc";_}; {s=Atom name;_}; cl; sub_pr] ->
-        let cl = lits_of_sexp cl in
-        let sub_pr = p_of_sexp sub_pr in
-        P.stepc ~loc ~name cl sub_pr
-      | List [{s=Atom "step";_}; {s=Atom name;_}; sub_pr] ->
-        let sub_pr = p_of_sexp sub_pr in
-        P.step ~loc ~name sub_pr
-      | List [{s=Atom "ty_decl";_}; {s=Atom name;loc=_}; {s=Atom n;loc=loc_n}] ->
-        let n = try int_of_string n
-          with _ -> Error.failf ~loc:loc_n "expect arity (a number)" in
-        P.decl_ty_const ~loc name n
-      | List [{s=Atom "decl";_}; {s=Atom name;loc=_}; ty] ->
-        let ty = ty_of_sexp ty in
-        P.decl_const ~loc name ty
-      | List [{s=Atom "def";_}; {s=Atom name;loc=_}; ty; rhs] ->
-        let ty = ty_of_sexp ty in
-        let rhs = t_of_sexp rhs in
-        P.define_const ~loc name ty rhs
-      | _ -> Error.failf ~loc "expected a composite step (`deft` or `stepc`)"
+    and parse_step () : _ P.composite_step =
+      let loc0 = loc() in
+      expect ~msg:"composite step" LIST_OPEN;
+      let res =
+        match cur_consume() with
+        | ATOM "deft" ->
+          let name = atom ~msg:"term name" () in
+          let t = parse_term () in
+          let loc = loc_since loc0 in
+          P.deft name ~loc t
 
-    let parse_sexp_l_ (l:sexp list) : P.t =
+        | ATOM "stepc" ->
+          let name = atom ~msg:"clause name" () in
+          let cl = parse_lits() in
+          let sub_pr = parse_proof() in
+          let loc = loc_since loc0 in
+          P.stepc ~loc ~name cl sub_pr
+
+        | ATOM "step" ->
+          let name = atom ~msg:"clause name" () in
+          let sub_pr = parse_proof() in
+          let loc = loc_since loc0 in
+          P.step ~loc ~name sub_pr
+
+        | ATOM "ty_decl" ->
+          let name = atom ~msg:"type name" () in
+          let loc_n = loc() in
+          let n = atom ~msg:"arity" () in
+          let n = try int_of_string n
+            with _ -> Error.failf ~loc:loc_n "expect arity (a number)" in
+          let loc = loc_since loc0 in
+          P.decl_ty_const ~loc name n
+
+        | ATOM "decl" ->
+          let name = atom ~msg:"symbol name" () in
+          let ty = parse_ty() in
+          let loc = loc_since loc0 in
+          P.decl_const ~loc name ty
+
+        | ATOM "def" ->
+          let name = atom ~msg:"defined term name" () in
+          let ty = parse_ty() in
+          let rhs = parse_term() in
+          let loc = loc_since loc0 in
+          P.define_const ~loc name ty rhs
+
+        | _t ->
+          Error.failf ~loc:loc0
+            "unexpected %a,@ expected a composite step (`deft` or `stepc`)"
+            pp_token _t
+      in
+      expect ~msg:"closing proof step" LIST_CLOSE;
+      res
+
+    let parse_sexp_l_ () : P.t =
       Profile.with_ "proof.decode-sexp" @@ fun () ->
-      match l with
-      | [{s=List [{s=Atom "quip";_}; {s=Atom "1";_}; bod];_}] -> p_of_sexp bod
-      | {s=List [{s=Atom "quip";loc=loc1}; {s=Atom "1";_}];_} :: steps ->
-        let loc = Loc.union_l (loc1 :: List.rev_map (fun s->s.loc) steps)
-                  |> CCOpt.get_or ~default:loc1
-        in
-        let steps = List.map step_of_sexp steps in
-        P.composite_l ~loc ~assms:[] steps
-      | s1 :: _ -> Error.failf ~loc:s1.loc "expected `(quip 1 <proof>)` or `(quip 1) <steps>"
-      | [] -> Error.failf ~loc:Loc.none "expected `(quip 1 <proof>)` or `(quip 1) <steps>"
 
-    let parse_top lexbuf : P.t =
-      let dec = Decoder.of_lexbuf lexbuf in
-      match Profile.with1 "proof.parse-sexp" Decoder.to_list dec with
-      | Ok l -> parse_sexp_l_ l
-      | Error e -> Error.failf ~loc:Loc.none "expected proof (list of S-expressions), but:@ %s" e
+      expect LIST_OPEN;
+      expect (ATOM "quip");
+      expect (ATOM "1");
+
+      begin match cur() with
+        | LIST_CLOSE ->
+          consume();
+
+          let loc0 = loc() in
+          (* toplevel steps *)
+          let rec loop acc =
+            match cur() with
+            | EOI ->
+              let loc = loc_since loc0 in
+              let steps = List.rev acc in
+              P.composite_l ~loc ~assms:[] steps
+            | _ ->
+              let p = parse_step() in
+              loop (p::acc)
+          in
+          loop []
+
+        | _ ->
+          let p = parse_proof () in
+          expect ~msg:"closing top proof" LIST_CLOSE;
+          p
+      end
+
+    let parse_top () : P.t =
+      try
+        parse_sexp_l_ ()
+      with Sexp_lex.Error (line,col,msg) ->
+        Error.failf "Invalid syntax at %d:%d:\n%s" line col msg
   end
 
-  let parse_lexbuf_ ~input ~filename lexbuf : P.t =
+  let parse_string ?(filename="<string>") (str:string) : P.t =
     Profile.with_ "parse-proof" @@ fun () ->
+    let input = Loc.Input.string str in
     let module P = Parse(struct
         let filename=filename
         let input = input
+        let str = str
       end) () in
-    Loc.set_file lexbuf filename;
-    P.parse_top lexbuf
-
-  let parse_string ?(filename="<string>") (s:string) : P.t =
-    let lexbuf = Lexing.from_string s in
-    let input = Loc.Input.string s in
-    parse_lexbuf_ ~input ~filename lexbuf
-
-  let parse_chan ?(filename="<channel>") ~input (ic:in_channel) : P.t =
-    let lexbuf = Lexing.from_channel ic in
-    parse_lexbuf_ ~filename ~input lexbuf
-
-  let parse_file filename =
-    CCIO.with_in filename @@ fun ic ->
-    let input = Loc.Input.file filename in
-    parse_chan ~filename ~input ic
+    P.parse_top ()
 end
 

@@ -8,7 +8,7 @@ module E = K.Expr
 
 type t
 
-val create : K.ctx -> Env.t -> t
+val create : K.ctx -> Env.t -> Ast.Small_loc.ctx -> t
 
 type stats = {
   n_valid: int;

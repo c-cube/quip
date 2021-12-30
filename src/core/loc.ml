@@ -2,47 +2,7 @@
 module Fmt = CCFormat
 module P = Position
 
-(* line index *)
-module Index : sig
-  type t
-  val of_string : string -> t
-  val find_line_offset : t -> line:int -> int
-  val find_offset : t -> line:int -> col:int -> int
-end = struct
-  module Vec = CCVector
-  (* a list of offsets of newlines *)
-  type t = {
-    lines: int Vec.ro_vector;
-    size: int; (* total length *)
-  }
-
-  let of_string (s:string) : t =
-    let lines = Vec.create() in
-    Vec.push lines 0; (* first line is free *)
-    let size = String.length s in
-    let i = ref 0 in
-    while !i < size do
-      match String.index_from_opt s !i '\n' with
-      | None -> i := size
-      | Some j ->
-        Vec.push lines j;
-        i := j+1;
-    done;
-    let lines = Vec.freeze lines in
-    { lines; size; }
-
-  let find_line_offset (self:t) ~line : int =
-    let line = line-1 in
-    if line >= Vec.length self.lines then (
-      self.size
-    ) else (
-      Vec.get self.lines line
-    )
-
-  let find_offset (self:t) ~line ~col : int =
-    let off = find_line_offset self ~line in
-    off + (col - 1)
-end
+module Index = Line_index
 
 module Input = struct
   type view =

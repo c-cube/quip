@@ -69,7 +69,7 @@ module Check = struct
     let quiet = opts.Opts.quiet in
     let chrono = Chrono.start() in
     Log.app (fun k->k"process proof '%s' with problem %a" proof (Fmt.opt Fmt.string_quoted) problem);
-    let proof =
+    let proof, ast_ctx =
       let content = with_file_in proof CCIO.read_all in
       if not quiet then (
         Log.app (fun k->k"proof size: %d bytes" (String.length content));
@@ -90,7 +90,7 @@ module Check = struct
         env
     in
 
-    let checker = Check.create ctx env in
+    let checker = Check.create ctx env ast_ctx in
 
     Fmt.printf "checking proof…@.";
     let proof_valid, bad_steps, errors, stats = Check.check_proof checker proof in
@@ -123,7 +123,7 @@ module Dot = struct
     wrap_err @@ fun () ->
     Opts.apply opts;
 
-    let proof =
+    let proof, _ast_ctx =
       let content = with_file_in proof_file CCIO.read_all in
       Parser.Proof.parse_string ~filename:proof_file content
     in

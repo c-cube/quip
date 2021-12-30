@@ -1,6 +1,17 @@
 
 open Common
 
+module Small_loc : sig
+  type ctx
+  val create : filename:string -> string -> ctx
+
+  type t = private int
+  val union : t -> t -> t
+  val of_lexbuf : ctx -> Lexing.lexbuf -> t
+  val make : ctx -> off1:int -> off2:int -> t
+  val to_loc : ctx -> t -> Loc.t
+end
+
 (* TODO: structured name? like SMTLIB's composite identifiers *)
 module Name : sig
   type t = string
@@ -10,7 +21,7 @@ end
 module Ty : sig
   type t = {
     view: view;
-    loc: Loc.t
+    loc: Small_loc.t
   }
   and view =
     | Constr of Name.t * t list
@@ -18,8 +29,8 @@ module Ty : sig
 
   val pp : t Fmt.printer
 
-  val constr : loc:Loc.t -> Name.t -> t list -> t
-  val arrow : loc:Loc.t -> t list -> t -> t
+  val constr : loc:Small_loc.t -> Name.t -> t list -> t
+  val arrow : loc:Small_loc.t -> t list -> t -> t
 end
 
 type ty = Ty.t
@@ -50,23 +61,23 @@ module Term : sig
   [@@deriving show]
 
   val view : t -> (t, Ty.t) view
-  val loc : t -> Loc.t
+  val loc : t -> Small_loc.t
   val map_shallow : (t -> t) -> t -> t
 
   (** Rewrite a term with the given function *)
   val rw : rule:(t -> t option) -> t -> t
 
-  val ref : loc:Loc.t -> string -> t
-  val var : loc:Loc.t -> Ty.t option Var.t -> t
-  val eq : loc:Loc.t -> t -> t -> t
-  val not: loc:Loc.t -> t -> t
-  val app_var : loc:Loc.t -> Ty.t option Var.t -> t list -> t
-  val app_name : loc:Loc.t -> Name.t -> t list -> t
-  val const : loc:Loc.t -> Name.t -> t
-  val let_ : loc:Loc.t -> (unit Var.t * t) list -> t -> t
-  val fun_ : loc:Loc.t -> Ty.t Var.t -> t -> t
-  val ite : loc:Loc.t -> t -> t -> t -> t
-  val is_a : loc:Loc.t -> Name.t -> t -> t
+  val ref : loc:Small_loc.t -> string -> t
+  val var : loc:Small_loc.t -> Ty.t option Var.t -> t
+  val eq : loc:Small_loc.t -> t -> t -> t
+  val not: loc:Small_loc.t -> t -> t
+  val app_var : loc:Small_loc.t -> Ty.t option Var.t -> t list -> t
+  val app_name : loc:Small_loc.t -> Name.t -> t list -> t
+  val const : loc:Small_loc.t -> Name.t -> t
+  val let_ : loc:Small_loc.t -> (unit Var.t * t) list -> t -> t
+  val fun_ : loc:Small_loc.t -> Ty.t Var.t -> t -> t
+  val ite : loc:Small_loc.t -> t -> t -> t -> t
+  val is_a : loc:Small_loc.t -> Name.t -> t -> t
 end
 
 type term = Term.t
@@ -81,14 +92,14 @@ end
 module Clause : sig
   type t = {
     view: view;
-    loc: Loc.t
+    loc: Small_loc.t
   }
   and view =
     | Clause of term list
     | Clause_ref of Name.t
 
   val pp : t Fmt.printer
-  val mk : loc:Loc.t -> view -> t
+  val mk : loc:Small_loc.t -> view -> t
 end
 
 type clause = Clause.t
@@ -113,7 +124,7 @@ module Proof : sig
 
   type 'proof hres_step = {
     view: 'proof hres_step_view;
-    loc: Loc.t;
+    loc: Small_loc.t;
   }
   and 'proof hres_step_view =
     | R of { pivot: term; p: 'proof}
@@ -124,7 +135,7 @@ module Proof : sig
 
   type 'proof composite_step = {
     view: 'proof composite_step_view;
-    loc: Loc.t;
+    loc: Small_loc.t;
   }
   and 'proof composite_step_view =
     | S_step_c of {
@@ -191,68 +202,68 @@ module Proof : sig
   [@@deriving show {with_path=false}, map, iter]
 
   val view : t -> (term,clause,t) view
-  val loc : t -> Loc.t
+  val loc : t -> Small_loc.t
 
-  val r : loc:Loc.t -> t -> pivot:term -> t hres_step
+  val r : loc:Small_loc.t -> t -> pivot:term -> t hres_step
   (** Resolution step on given pivot term *)
 
-  val r1 : loc:Loc.t -> t -> t hres_step
+  val r1 : loc:Small_loc.t -> t -> t hres_step
   (** Unit resolution; pivot is obvious *)
 
-  val p : loc:Loc.t -> t -> lhs:term -> rhs:term -> t hres_step
+  val p : loc:Small_loc.t -> t -> lhs:term -> rhs:term -> t hres_step
   (** Paramodulation using proof whose conclusion has a literal [lhs=rhs] *)
 
-  val p1 : loc:Loc.t -> t -> t hres_step
+  val p1 : loc:Small_loc.t -> t -> t hres_step
   (** Unit paramodulation *)
 
-  val stepc : loc:Loc.t -> name:string -> term list -> t -> t composite_step
-  val step : loc:Loc.t -> name:string -> t -> t composite_step
+  val stepc : loc:Small_loc.t -> name:string -> term list -> t -> t composite_step
+  val step : loc:Small_loc.t -> name:string -> t -> t composite_step
 
-  val deft : loc:Loc.t -> string -> term -> t composite_step (** define a (new) atomic term *)
+  val deft : loc:Small_loc.t -> string -> term -> t composite_step (** define a (new) atomic term *)
 
-  val decl_const : loc:Loc.t -> string -> Ty.t -> t composite_step
+  val decl_const : loc:Small_loc.t -> string -> Ty.t -> t composite_step
 
-  val decl_ty_const : loc:Loc.t -> string -> int -> t composite_step
+  val decl_ty_const : loc:Small_loc.t -> string -> int -> t composite_step
 
-  val define_const : loc:Loc.t -> string -> Ty.t -> term -> t composite_step
+  val define_const : loc:Small_loc.t -> string -> Ty.t -> term -> t composite_step
 
   val is_trivial_refl : t -> bool
   (** is this a proof of [|- t=t]? This can be used to remove
       some trivial steps that would build on the proof (e.g. rewriting
       using [refl t] is useless). *)
 
-  val assertion : loc:Loc.t -> term -> t
-  val ref_by_name : loc:Loc.t -> string -> t (* named clause, see {!defc} *)
-  val assertion_c : loc:Loc.t -> Clause.t -> t
-  val hres_l : loc:Loc.t -> t -> t hres_step list -> t (* hyper-res *)
-  val res : loc:Loc.t -> pivot:term -> t -> t -> t
-  val res1 : loc:Loc.t -> t -> t -> t
-  val subst : loc:Loc.t -> Subst.t -> t -> t
-  val refl : loc:Loc.t -> term -> t (* proof of [| t=t] *)
-  val true_is_true : loc:Loc.t -> t (* proof of [|- true] *)
-  val true_neq_false : loc:Loc.t -> t (* proof of [|- not (true=false)] *)
-  val cc_lemma : loc:Loc.t -> Clause.t -> t
-  val cc_imply2 : loc:Loc.t -> t -> t -> term -> term -> t (* tautology [p1, p2 |- t=u] *)
-  val cc_imply_l : loc:Loc.t -> t list -> term -> term -> t (* tautology [hyps |- t=u] *)
-  val composite_l : loc:Loc.t -> ?assms:(string * term) list -> t composite_step list -> t
-  val rup_res : loc:Loc.t -> clause -> t list -> t
-  val paramod1 : loc:Loc.t -> rw_with:t -> t -> t
-  val clause_rw : loc:Loc.t -> res:clause -> using:t list -> t -> t
-  val sorry : loc:Loc.t -> t
-  val sorry_c : loc:Loc.t -> Clause.t -> t
+  val assertion : loc:Small_loc.t -> term -> t
+  val ref_by_name : loc:Small_loc.t -> string -> t (* named clause, see {!defc} *)
+  val assertion_c : loc:Small_loc.t -> Clause.t -> t
+  val hres_l : loc:Small_loc.t -> t -> t hres_step list -> t (* hyper-res *)
+  val res : loc:Small_loc.t -> pivot:term -> t -> t -> t
+  val res1 : loc:Small_loc.t -> t -> t -> t
+  val subst : loc:Small_loc.t -> Subst.t -> t -> t
+  val refl : loc:Small_loc.t -> term -> t (* proof of [| t=t] *)
+  val true_is_true : loc:Small_loc.t -> t (* proof of [|- true] *)
+  val true_neq_false : loc:Small_loc.t -> t (* proof of [|- not (true=false)] *)
+  val cc_lemma : loc:Small_loc.t -> Clause.t -> t
+  val cc_imply2 : loc:Small_loc.t -> t -> t -> term -> term -> t (* tautology [p1, p2 |- t=u] *)
+  val cc_imply_l : loc:Small_loc.t -> t list -> term -> term -> t (* tautology [hyps |- t=u] *)
+  val composite_l : loc:Small_loc.t -> ?assms:(string * term) list -> t composite_step list -> t
+  val rup_res : loc:Small_loc.t -> clause -> t list -> t
+  val paramod1 : loc:Small_loc.t -> rw_with:t -> t -> t
+  val clause_rw : loc:Small_loc.t -> res:clause -> using:t list -> t -> t
+  val sorry : loc:Small_loc.t -> t
+  val sorry_c : loc:Small_loc.t -> Clause.t -> t
 
-  val with_ : loc:Loc.t -> with_bindings -> t -> t
+  val with_ : loc:Small_loc.t -> with_bindings -> t -> t
 
   val pp_debug : t Fmt.printer
 
-  val isa_split : loc:Loc.t -> ty -> term list -> t
-  val isa_disj : loc:Loc.t -> ty -> term -> term -> t
-  val cstor_inj : loc:Loc.t -> Name.t -> int -> term list -> term list -> t
+  val isa_split : loc:Small_loc.t -> ty -> term list -> t
+  val isa_disj : loc:Small_loc.t -> ty -> term -> term -> t
+  val cstor_inj : loc:Small_loc.t -> Name.t -> int -> term list -> term list -> t
 
-  val bool_eq : loc:Loc.t -> term -> term -> t
-  val bool_c : loc:Loc.t -> bool_c_name -> term list -> t
-  val ite_true : loc:Loc.t -> term -> t
-  val ite_false : loc:Loc.t -> term -> t
+  val bool_eq : loc:Small_loc.t -> term -> term -> t
+  val bool_c : loc:Small_loc.t -> bool_c_name -> term list -> t
+  val ite_true : loc:Small_loc.t -> term -> t
+  val ite_false : loc:Small_loc.t -> term -> t
 
-  val lra_l : loc:Loc.t -> Clause.t -> t
+  val lra_l : loc:Small_loc.t -> Clause.t -> t
 end

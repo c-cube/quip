@@ -11,6 +11,7 @@ module Proof = struct
     val filename : string
     val input : Loc.Input.t
     val str : string
+    val ast_ctx : A.Small_loc.ctx
   end
 
   type token = Sexp_lex.token =
@@ -21,8 +22,8 @@ module Proof = struct
   [@@deriving show]
 
   module Make_parser(PA:ARG)() : sig
-    val loc : unit -> Loc.t
-    val loc_since : Loc.t -> Loc.t
+    val loc : unit -> A.Small_loc.t
+    val loc_since : A.Small_loc.t -> A.Small_loc.t
     val cur : unit -> token
     val cur_consume : unit -> token
     val atom : msg:string -> unit -> string
@@ -32,15 +33,15 @@ module Proof = struct
     let lexbuf = Lexing.from_string ~with_positions:true PA.str
     let() = Loc.set_file lexbuf PA.filename
     let ctx = {Loc.input=PA.input; file=PA.filename}
-    let make_loc () = Loc.of_lexbuf' ~ctx lexbuf
+    let make_loc () = A.Small_loc.of_lexbuf PA.ast_ctx lexbuf
 
     let cur_ = ref (Sexp_lex.token lexbuf)
     let loc_ = ref (make_loc())
 
     let[@inline] cur() = !cur_
     let[@inline] loc() = !loc_
-    let loc_since l0 = Loc.union l0 (loc())
-    let consume() =
+    let loc_since l0 = A.Small_loc.union l0 (loc())
+    let[@inline] consume() =
       let t = Sexp_lex.token lexbuf in
       cur_ := t;
       loc_ := make_loc();
@@ -48,16 +49,18 @@ module Proof = struct
 
     let cur_consume() = let t = cur() in consume(); t
 
+    let trsloc loc = Ast.Small_loc.to_loc PA.ast_ctx loc
+
     let[@inline] atom ~msg () = match cur() with
       | ATOM s -> consume(); s
       | t ->
-        Error.failf ~loc:(loc()) "expected %s (<atom>), got %a" msg pp_token t
+        Error.failf ~loc:(trsloc !loc_) "expected %s (<atom>), got %a" msg pp_token t
 
     let expect ?msg tok =
       let t = cur() in
       if t = tok then consume()
       else (
-        let loc=loc() in
+        let loc = trsloc !loc_ in
         match msg with
         | None ->
           Error.failf ~loc "expected %a, got %a" pp_token tok pp_token t
@@ -69,6 +72,7 @@ module Proof = struct
   (* custom sexp parser *)
   module Parse(PA : ARG)() = struct
     open Make_parser(PA)()
+    let trsloc loc = Ast.Small_loc.to_loc PA.ast_ctx loc
 
     (** [list_args p] parses instances of [p], followed by ')',
         but does not consume ')' *)
@@ -103,12 +107,12 @@ module Proof = struct
           | ATOM name ->
             let args = list_args parse_ty in
             A.Ty.constr ~loc name args
-          | _ -> Error.failf ~loc "expected atom"
+          | _ -> Error.failf ~loc:(trsloc loc) "expected atom"
         in
         expect LIST_CLOSE;
         res
       | _t ->
-        Error.failf ~loc "expected a type, got %a" pp_token _t
+        Error.failf ~loc:(trsloc loc) "expected a type, got %a" pp_token _t
 
     (** Parse term *)
     let rec parse_term () : T.t =
@@ -204,11 +208,11 @@ module Proof = struct
           parse_errorf s "unimplemented `!`" (* TODO: named expr from input problem? *)
         *)
 
-          | _t -> Error.failf ~loc:loc0 "expected a term, got %a" pp_token _t
+          | _t -> Error.failf ~loc:(trsloc loc0) "expected a term, got %a" pp_token _t
         in
         expect LIST_CLOSE;
         res
-      | _t -> Error.failf ~loc:loc0 "unexpected %a, expected a term" pp_token _t
+      | _t -> Error.failf ~loc:(trsloc loc0) "unexpected %a, expected a term" pp_token _t
 
     (** Parse substitution *)
     let parse_subst () : A.Subst.t =
@@ -226,7 +230,7 @@ module Proof = struct
         loop []
 
       | _t ->
-        Error.failf ~loc:loc0
+        Error.failf ~loc:(trsloc loc0)
           "unexpected %a, expected substitution of shape `(<var> <term> …)`"
           pp_token _t
 
@@ -258,7 +262,7 @@ module Proof = struct
           A.Clause.(mk ~loc @@ Clause c_lits)
 
         | _t ->
-          Error.failf ~loc:loc0
+          Error.failf ~loc:(trsloc loc0)
             "unexpected %a, expected a clause `(cl t1 t2 … tn)` or `(@ <name>)`"
             pp_token _t
       in
@@ -336,7 +340,7 @@ module Proof = struct
               | "xor-e" -> Xor_e
               | "eq-i" -> Eq_i
               | "eq-e" -> Eq_e
-              | _ -> Error.failf ~loc:name_loc "unknown bool-c rule: '%s'" name
+              | _ -> Error.failf ~loc:(trsloc name_loc) "unknown bool-c rule: '%s'" name
             ) in
 
             let loc = loc_since loc0 in
@@ -417,7 +421,7 @@ module Proof = struct
                 P.r ~loc ~pivot sub_p
 
               | _t ->
-                Error.failf ~loc:loc0
+                Error.failf ~loc:(trsloc loc0)
                   "unexpected %a, expected a step for `hres` (hint: p1|r1|p|r)"
                   pp_token _t
             in
@@ -454,7 +458,7 @@ module Proof = struct
             P.ref_by_name ~loc name
 
           | _t ->
-            Error.failf ~loc:loc0 "unexpected %a, expected a proof"
+            Error.failf ~loc:(trsloc loc0) "unexpected %a, expected a proof"
               pp_token _t
 
         in
@@ -462,7 +466,7 @@ module Proof = struct
         res
 
       | _t ->
-        Error.failf ~loc:loc0
+        Error.failf ~loc:(trsloc loc0)
           "unexpected %a, expected a proof" pp_token _t
 
     (** Parse a composite step *)
@@ -495,7 +499,7 @@ module Proof = struct
           let loc_n = loc() in
           let n = atom ~msg:"arity" () in
           let n = try int_of_string n
-            with _ -> Error.failf ~loc:loc_n "expect arity (a number)" in
+            with _ -> Error.failf ~loc:(trsloc loc_n) "expect arity (a number)" in
           let loc = loc_since loc0 in
           P.decl_ty_const ~loc name n
 
@@ -513,7 +517,7 @@ module Proof = struct
           P.define_const ~loc name ty rhs
 
         | _t ->
-          Error.failf ~loc:loc0
+          Error.failf ~loc:(trsloc loc0)
             "unexpected %a,@ expected a composite step (`deft` or `stepc`)"
             pp_token _t
       in
@@ -521,8 +525,6 @@ module Proof = struct
       res
 
     let parse_sexp_l_ () : P.t =
-      Profile.with_ "proof.decode-sexp" @@ fun () ->
-
       expect LIST_OPEN;
       expect (ATOM "quip");
       expect (ATOM "1");
@@ -558,14 +560,16 @@ module Proof = struct
         Error.failf "Invalid syntax at %d:%d:\n%s" line col msg
   end
 
-  let parse_string ?(filename="<string>") (str:string) : P.t =
+  let parse_string ?(filename="<string>") (str:string) : P.t * _ =
     Profile.with_ "parse-proof" @@ fun () ->
     let input = Loc.Input.string str in
+    let ast_ctx = A.Small_loc.create ~filename str in
     let module P = Parse(struct
         let filename=filename
         let input = input
         let str = str
+        let ast_ctx = ast_ctx
       end) () in
-    P.parse_top ()
+    P.parse_top (), ast_ctx
 end
 

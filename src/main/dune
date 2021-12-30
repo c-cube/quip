@@ -5,7 +5,6 @@
 (executable
   (name quip)
   (public_name quip)
-  (modules quip)
   (libraries quip.core quip.util
              smtlib-utils containers unix cmdliner
              ppx_deriving.runtime)

@@ -1,2 +1,2 @@
 #!/usr/bin/env sh
-exec dune exec src/main/quip.exe -- $@
+exec dune exec --profile=release src/main/quip.exe -- $@

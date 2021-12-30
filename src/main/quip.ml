@@ -35,7 +35,17 @@ module Opts = struct
     Fmt.set_color_default color;
     setup_log log_level;
     if gc_stats then at_exit (fun () ->
-        Printf.printf "gc stats: %t\n%!" Gc.print_stat
+        let stat = Gc.stat() in
+        Printf.printf
+          "; gc stats:\n; - minor gc: %d\n; - major gc: %d\n\
+           ; - minor heap: %.2fMB\n; - major heap: %.2fMB\n\
+           ; - promoted: %.2fMB\n; - top heap: %.2fMB\n\
+           %!"
+          stat.minor_collections stat.major_collections
+          (stat.minor_words *. 8e-6)
+          (stat.major_words *. 8e-6)
+          (stat.promoted_words *. 8e-6)
+          (float stat.top_heap_words *. 8e-6)
       );
     ()
 end

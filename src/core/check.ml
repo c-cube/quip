@@ -137,12 +137,12 @@ module Make(A : ARG) : S = struct
       dummy_e = K.Expr.const ctx _c [];
     }
 
-  let rec conv_ty (ty: Ast.ty) : K.ty =
+  let rec conv_ty_ (ty: Ast.ty) : K.ty =
     let loc = ty.loc in
     match ty.view with
     | Ast.Ty.Arrow (args, ret) ->
-      let args = List.map conv_ty args in
-      let ret = conv_ty ret in
+      let args = List.map conv_ty_ args in
+      let ret = conv_ty_ ret in
       E.arrow_l ctx args ret
     | Ast.Ty.Constr (s, args) ->
       (* FIXME: type variables *)
@@ -150,17 +150,19 @@ module Make(A : ARG) : S = struct
         | None ->
           Error.failf ~loc:(trsloc loc) "cannot convert unknown type constant `%s`" s
         | Some c ->
-          let args = List.map conv_ty args in
+          let args = List.map conv_ty_ args in
           E.const ctx c args
       end
 
-  let rec conv_term (t: Ast.term) : K.expr =
+  let conv_ty ty = conv_ty_ ty
+
+  let rec conv_term_ (t: Ast.term) : K.expr =
     let module T = Ast.Term in
     (* Log.debug (fun k->k"(@[conv-t %a@])" T.pp t); *)
     let loc = T.loc t in
     begin match T.view t with
       | T.App (f, l) ->
-        let l = List.map conv_term l in
+        let l = List.map conv_term_ l in
         begin match T.view f, l with
           | T.Var {name="=";_}, [a;b] ->
             (* special case so we handle the polymorphism directly *)
@@ -175,11 +177,11 @@ module Make(A : ARG) : S = struct
                   e1 tl
 
               | _ ->
-               let f = conv_term f in
+               let f = conv_term_ f in
                K.Expr.app_l ctx f l
             end
           | _ ->
-            let f = conv_term f in
+            let f = conv_term_ f in
             K.Expr.app_l ctx f l
         end
       | T.Var v ->
@@ -199,13 +201,13 @@ module Make(A : ARG) : S = struct
             end
         end
       | T.Not u ->
-        let u = conv_term u in
+        let u = conv_term_ u in
         E.not_ ctx u
       | T.Ite (a,b,c) ->
         let ite = get_builtin_ ~loc B.If in
-        let a = conv_term a in
-        let b = conv_term b in
-        let c = conv_term c in
+        let a = conv_term_ a in
+        let b = conv_term_ b in
+        let c = conv_term_ c in
         E.app_l ctx (E.const ctx ite [E.ty_exn b]) [a;b;c]
 
       | T.Ref name ->
@@ -220,7 +222,7 @@ module Make(A : ARG) : S = struct
           | None -> Error.failf ~loc:(trsloc loc) "unknown constructor '%s'" c
           | Some c -> c
         in
-        let t = conv_term t in
+        let t = conv_term_ t in
         E.app ctx (E.const ctx c.c_isa []) t
 
       | T.Fun _ ->
@@ -232,6 +234,8 @@ module Make(A : ARG) : S = struct
         (* TODO *)
         Error.failf ~loc:(trsloc loc) "todo: conv term `%a`" T.pp t
     end
+
+  let conv_term t = Profile.with1 "conv-term" conv_term_ t
 
   let conv_subst (s:Ast.Subst.t) : K.Subst.t =
     List.fold_left
@@ -255,6 +259,7 @@ module Make(A : ARG) : S = struct
       cl lits
 
   let conv_clause (c: Ast.clause) : Clause.t =
+    Profile.with_ "conv-clause" @@ fun () ->
     Log.debug (fun k->k"conv-clause %a" Ast.Clause.pp c);
     let loc = c.loc in
     match c.view with

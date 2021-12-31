@@ -43,17 +43,18 @@ module Var = struct
 end
 
 let pp_l pp out l = Fmt.(list ~sep:(return "@ ") pp) out l
+let pp_a pp out l = Fmt.(array ~sep:(return "@ ") pp) out l
 
 module Term = struct
   type ('t,'ty) view =
-    | App of 't * 't list
+    | App of 't * 't array
     | Fun of 'ty Var.t * 't
     | Is_a of Name.t * 't
     | Var of 'ty option Var.t
     | Ite of 't * 't * 't
     | Not of 't
     | As of 't * Ty.t (* cast *)
-    | Let of (unit Var.t * 't) list * 't
+    | Let of (unit Var.t * 't) array * 't
     | Ref of string
   [@@deriving show, map, fold, iter]
 
@@ -72,13 +73,13 @@ module Term = struct
   let var ~loc v = mk_ ~loc (Var v)
   let app_var ~loc v l : t =
     let v = var ~loc v in
-    if l=[] then v else mk_ ~loc (App (v, l))
+    if l=[||] then v else mk_ ~loc (App (v, l))
   let app_name ~loc v l : t = app_var ~loc (Var.make ~ty:None v) l
-  let const ~loc c = app_name ~loc c []
+  let const ~loc c = app_name ~loc c [||]
   let not ~loc u = match u.view with
     | Not v -> v
     | _ -> mk_ ~loc (Not u)
-  let eq ~loc a b : t = app_name ~loc "=" [a;b]
+  let eq ~loc a b : t = app_name ~loc "=" [|a;b|]
   let let_ ~loc bs bod : t = mk_ ~loc (Let (bs,bod))
   let fun_ ~loc v bod : t = mk_ ~loc (Fun (v,bod))
   let ite ~loc a b c : t = mk_ ~loc (Ite (a,b,c))
@@ -94,13 +95,13 @@ module Term = struct
   let rec pp out t = match t.view with
     | Var v -> Var.pp_name out v
     | App (f, l) ->
-      Fmt.fprintf out "(@[%a@ %a@])" pp f (pp_l pp) l
+      Fmt.fprintf out "(@[%a@ %a@])" pp f (pp_a pp) l
     | Is_a (c,t) -> Fmt.fprintf out "(@[(_ is %a)@ %a@])" Name.pp c pp t
     | Ite (a,b,c) -> Fmt.fprintf out "(@[ite@ %a@ %a@ %a@])" pp a pp b pp c
     | Not u -> Fmt.fprintf out "(@[@<1>¬@ %a@])" pp u
     | Let (bs, bod) ->
       let ppb out (v,t) = Fmt.fprintf out "(@[%a@ %a@])" Var.pp_name v pp t in
-      Fmt.fprintf out "(@[let@ (@[%a@]@ %a@])" (pp_l ppb) bs pp bod
+      Fmt.fprintf out "(@[let@ (@[%a@]@ %a@])" (pp_a ppb) bs pp bod
     | Fun (v,t) ->
       Fmt.fprintf out "(@[lambda %a@ %a@])" (Var.pp Ty.pp) v pp t
     | As (t,ty) -> Fmt.fprintf out "(@[as@ %a@ %a@])" pp t Ty.pp ty
@@ -124,14 +125,14 @@ module Clause = struct
     loc: Small_loc.t
   }
   and view =
-    | Clause of term list
+    | Clause of term array
     | Clause_ref of Name.t
 
   let mk ~loc view : t = {loc;view}
   let pp out (c:t) =
     match c.view with
     | Clause lits ->
-      Fmt.fprintf out "(@[cl@ %a@])" Fmt.(list ~sep:(return "@ ") Term.pp) lits
+      Fmt.fprintf out "(@[cl@ %a@])" (pp_a Term.pp) lits
     | Clause_ref n -> Fmt.fprintf out "(@[@@ %s@])" n
 end
 
@@ -167,7 +168,7 @@ module Proof = struct
   type 'proof composite_step_view =
     | S_step_c of {
         name: string; (* name *)
-        res: term list; (* result of [proof] *)
+        res: term array; (* result of [proof] *)
         proof: 'proof; (* sub-proof *)
       }
     | S_step_anon of {

@@ -149,7 +149,7 @@ module Proof = struct
               expect ~msg:"close let binding" LIST_CLOSE;
               A.Var.make ~ty:() v, t
             in
-            let l = list_of p_pair in
+            let l = list_of p_pair |> Array.of_list in
             let bod = parse_term () in
 
             let loc = loc_since loc0 in
@@ -191,7 +191,7 @@ module Proof = struct
             T.is_a ~loc c u
 
           | ATOM f ->
-            let args = list_args parse_term in
+            let args = list_args parse_term |> Array.of_list in
 
             let loc = loc_since loc0 in
             T.app_name ~loc f args
@@ -231,10 +231,10 @@ module Proof = struct
           "unexpected %a, expected substitution of shape `(<var> <term> …)`"
           pp_token _t
 
-    let parse_lits () : A.term list =
+    let parse_lits () : A.term array =
       expect ~msg:"clause (cl t1…tn)" LIST_OPEN;
       expect (ATOM "cl");
-      let l = list_args parse_term in
+      let l = list_args parse_term |> Array.of_list in
       expect ~msg:"closing clause" LIST_CLOSE;
       l
 
@@ -253,7 +253,7 @@ module Proof = struct
 
         | ATOM "cl" ->
           consume();
-          let c_lits = list_args parse_term in
+          let c_lits = list_args parse_term |> Array.of_list in
 
           let loc = loc_since loc0 in
           A.Clause.(mk ~loc @@ Clause c_lits)

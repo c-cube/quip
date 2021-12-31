@@ -35,14 +35,14 @@ end
 
 module Term : sig
   type ('t,'ty) view =
-    | App of 't * 't list
+    | App of 't * 't array
     | Fun of 'ty Var.t * 't
     | Is_a of Name.t * 't
     | Var of 'ty option Var.t
     | Ite of 't * 't * 't
     | Not of 't
     | As of 't * Ty.t (* cast *)
-    | Let of (unit Var.t * 't) list * 't
+    | Let of (unit Var.t * 't) array * 't
     | Ref of string
   [@@deriving show, map, fold, iter]
 
@@ -60,10 +60,10 @@ module Term : sig
   val var : loc:Small_loc.t -> Ty.t option Var.t -> t
   val eq : loc:Small_loc.t -> t -> t -> t
   val not: loc:Small_loc.t -> t -> t
-  val app_var : loc:Small_loc.t -> Ty.t option Var.t -> t list -> t
-  val app_name : loc:Small_loc.t -> Name.t -> t list -> t
+  val app_var : loc:Small_loc.t -> Ty.t option Var.t -> t array -> t
+  val app_name : loc:Small_loc.t -> Name.t -> t array -> t
   val const : loc:Small_loc.t -> Name.t -> t
-  val let_ : loc:Small_loc.t -> (unit Var.t * t) list -> t -> t
+  val let_ : loc:Small_loc.t -> (unit Var.t * t) array -> t -> t
   val fun_ : loc:Small_loc.t -> Ty.t Var.t -> t -> t
   val ite : loc:Small_loc.t -> t -> t -> t -> t
   val is_a : loc:Small_loc.t -> Name.t -> t -> t
@@ -84,7 +84,7 @@ module Clause : sig
     loc: Small_loc.t
   }
   and view =
-    | Clause of term list
+    | Clause of term array
     | Clause_ref of Name.t
 
   val pp : t Fmt.printer
@@ -129,7 +129,7 @@ module Proof : sig
   and 'proof composite_step_view =
     | S_step_c of {
         name: string; (* name *)
-        res: term list; (* result of [proof] *)
+        res: term array; (* result of [proof] *)
         proof: 'proof; (* sub-proof *)
       }
     | S_step_anon of {
@@ -205,7 +205,7 @@ module Proof : sig
   val p1 : loc:Small_loc.t -> t -> t hres_step
   (** Unit paramodulation *)
 
-  val stepc : loc:Small_loc.t -> name:string -> term list -> t -> t composite_step
+  val stepc : loc:Small_loc.t -> name:string -> term array -> t -> t composite_step
   val step : loc:Small_loc.t -> name:string -> t -> t composite_step
 
   val deft : loc:Small_loc.t -> string -> term -> t composite_step (** define a (new) atomic term *)

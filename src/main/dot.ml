@@ -42,7 +42,7 @@ let norm_clause st (c:Ast.Clause.t) : T.t array =
        Log.err (fun k->k"cannot find clause %S" n);
        [||])
   | Ast.Clause.Clause lits ->
-    Array.of_list lits |> Array.map (norm_term st)
+    Array.map (norm_term st) lits
 
 (** A different type for proofs *)
 type normalized_proof = {
@@ -122,7 +122,7 @@ and pp_step (state:state) (self:_ composite_step) : unit =
     )
   | S_step_c {name; res; proof} ->
     if not (Hashtbl.mem state.printed name) then (
-      let res = Array.of_list res |> Array.map (norm_term state) in
+      let res = Array.map (norm_term state) res in
       Hashtbl.add state.printed name ();
       Hashtbl.add state.clauses name res;
 

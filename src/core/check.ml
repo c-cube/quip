@@ -162,7 +162,7 @@ module Make(A : ARG) : S = struct
     let loc = T.loc t in
     begin match T.view t with
       | T.App (f, l) ->
-        let l = List.map conv_term_ l in
+        let l = l |> Array.map conv_term_ |> Array.to_list in
         begin match T.view f, l with
           | T.Var {name="=";_}, [a;b] ->
             (* special case so we handle the polymorphism directly *)
@@ -251,10 +251,10 @@ module Make(A : ARG) : S = struct
     | Some u -> Lit.make ctx false u
     | None -> Lit.make ctx true t
 
-  let conv_lits (lits: Ast.term list) : Clause.t =
-    Log.debug (fun k->k"conv-lits %a" (Fmt.Dump.list Ast.Term.pp) lits);
+  let conv_lits (lits: Ast.term array) : Clause.t =
+    Log.debug (fun k->k"conv-lits %a" (Fmt.Dump.array Ast.Term.pp) lits);
     let cl = Clause.empty in
-    List.fold_left
+    Array.fold_left
       (fun c lit -> Clause.add (conv_lit lit) c)
       cl lits
 

@@ -1,62 +1,6 @@
 
 open Common
 
-module Small_loc = struct
-  type ctx = {
-    str: string;
-    ctx: Loc.ctx;
-    index: Line_index.t lazy_t;
-  }
-
-  let create ~filename str : ctx =
-    { str;
-      ctx={Loc.file=filename; input=Loc.Input.string str};
-      index=lazy (Line_index.of_string str);
-    }
-
-  type t = int [@@deriving show]
-
-  let() = assert (Sys.int_size = 63)
-  let n_bits_offset = 31
-  let n_bits_len = Sys.int_size - n_bits_offset
-
-  let mk_ off1 off2 : t =
-    assert (off2 >= off1);
-    let len = off2 - off1 in
-    assert (off1 < 1 lsl n_bits_offset);
-    assert (len < 1 lsl n_bits_len);
-    off1 lor (len lsl n_bits_offset)
-
-  let[@inline] make _ctx ~off1 ~off2 : t = mk_ off1 off2
-
-  let offsets_ self =
-    let off1 = self land ((1 lsl n_bits_offset) - 1) in
-    let len = self lsr n_bits_offset in
-    let off2 = off1 + len in
-    off1, off2
-
-  let union a b =
-    let a1, a2 = offsets_ a in
-    let b1, b2 = offsets_ b in
-    mk_ (min a1 b1) (max a2 b2)
-
-  let of_lexbuf _ctx (buf:Lexing.lexbuf) : t =
-    let open Lexing in
-    let off1 = buf.lex_start_p.pos_cnum in
-    let off2 = buf.lex_curr_p.pos_cnum in
-    mk_ off1 off2
-
-  let tr_offset ctx off : int * int =
-    let lazy index = ctx.index in
-    Line_index.line_col_of_offset index ~off
-
-  let to_loc ctx (self:t) : Loc.t =
-    let off1 = self land ((1 lsl n_bits_offset) - 1) in
-    let len = self lsr n_bits_offset in
-    let off2 = off1 + len in
-    Loc.mk_pair ~ctx:ctx.ctx (tr_offset ctx off1) (tr_offset ctx off2)
-end
-
 module Name = struct
   type t = string
   let pp out s = Fmt.string out s
@@ -211,7 +155,7 @@ module Proof = struct
 
   type 'proof hres_step = {
     view: 'proof hres_step_view;
-    loc: Small_loc.t;
+    loc: Small_loc.t [@opaque];
   }
   and 'proof hres_step_view =
     | R of { pivot: term; p: 'proof}
@@ -295,7 +239,7 @@ module Proof = struct
 
   type t = {
     view: (term, clause, t) view;
-    loc: Small_loc.t;
+    loc: Small_loc.t [@opaque];
   }
   [@@deriving show {with_path=false} ]
 

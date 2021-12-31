@@ -9,9 +9,8 @@ module Proof = struct
 
   module type ARG = sig
     val filename : string
-    val input : Loc.Input.t
     val str : string
-    val ast_ctx : A.Small_loc.ctx
+    val ast_ctx : Small_loc.ctx
   end
 
   type token = Sexp_lex.token =
@@ -22,8 +21,8 @@ module Proof = struct
   [@@deriving show]
 
   module Make_parser(PA:ARG)() : sig
-    val loc : unit -> A.Small_loc.t
-    val loc_since : A.Small_loc.t -> A.Small_loc.t
+    val loc : unit -> Small_loc.t
+    val loc_since : Small_loc.t -> Small_loc.t
     val cur : unit -> token
     val cur_consume : unit -> token
     val atom : msg:string -> unit -> string
@@ -31,16 +30,14 @@ module Proof = struct
     val expect : ?msg:string -> token -> unit
   end = struct
     let lexbuf = Lexing.from_string ~with_positions:true PA.str
-    let() = Loc.set_file lexbuf PA.filename
-    let ctx = {Loc.input=PA.input; file=PA.filename}
-    let make_loc () = A.Small_loc.of_lexbuf PA.ast_ctx lexbuf
+    let make_loc () = Small_loc.of_lexbuf ~ctx:PA.ast_ctx lexbuf
 
     let cur_ = ref (Sexp_lex.token lexbuf)
     let loc_ = ref (make_loc())
 
     let[@inline] cur() = !cur_
     let[@inline] loc() = !loc_
-    let loc_since l0 = A.Small_loc.union l0 (loc())
+    let loc_since l0 = Small_loc.union l0 (loc())
     let[@inline] consume() =
       let t = Sexp_lex.token lexbuf in
       cur_ := t;
@@ -49,7 +46,7 @@ module Proof = struct
 
     let cur_consume() = let t = cur() in consume(); t
 
-    let trsloc loc = Ast.Small_loc.to_loc PA.ast_ctx loc
+    let trsloc loc : Loc.t = (PA.ast_ctx, loc)
 
     let[@inline] atom ~msg () = match cur() with
       | ATOM s -> consume(); s
@@ -72,7 +69,7 @@ module Proof = struct
   (* custom sexp parser *)
   module Parse(PA : ARG)() = struct
     open Make_parser(PA)()
-    let trsloc loc = Ast.Small_loc.to_loc PA.ast_ctx loc
+    let trsloc loc = (PA.ast_ctx, loc)
 
     (** [list_args p] parses instances of [p], followed by ')',
         but does not consume ')' *)
@@ -567,11 +564,9 @@ module Proof = struct
 
   let parse_string ?(filename="<string>") (str:string) : P.t * _ =
     Profile.with_ "parse-proof" @@ fun () ->
-    let input = Loc.Input.string str in
-    let ast_ctx = A.Small_loc.create ~filename str in
+    let ast_ctx = Small_loc.create ~filename str in
     let module P = Parse(struct
         let filename=filename
-        let input = input
         let str = str
         let ast_ctx = ast_ctx
       end) () in

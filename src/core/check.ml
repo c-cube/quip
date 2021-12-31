@@ -24,7 +24,7 @@ type t = (module S)
 module type ARG = sig
   val ctx : K.ctx
   val problem : Env.t
-  val ast_ctx : Ast.Small_loc.ctx
+  val ast_ctx : Small_loc.ctx
 end
 
 module Make(A : ARG) : S = struct
@@ -32,7 +32,7 @@ module Make(A : ARG) : S = struct
   module Problem = (val A.problem)
   module B = Builtin
 
-  let trsloc loc = Ast.Small_loc.to_loc A.ast_ctx loc
+  let trsloc loc : Loc.t = (A.ast_ctx, loc)
 
   let unwrap_or_ msg = function
     | Some x -> x

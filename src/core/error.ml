@@ -59,8 +59,9 @@ let pp out (self:t) =
     let {msg; loc; ctx_of=_} = self in
     match loc with
     | None -> Fmt.string_lines out msg
-    | Some loc ->
-      Fmt.fprintf out "@[<v>%a@,%a@]@]" Fmt.string_lines msg Loc.pp loc
+    | Some (ctx,loc) ->
+      Fmt.fprintf out "@[<v>%a@,%a@]@]"
+        Fmt.string_lines msg (Small_loc.pp ~ctx) loc
   in
   let rec loop out self =
     begin match self.ctx_of with

@@ -1,17 +1,6 @@
 
 open Common
 
-module Small_loc : sig
-  type ctx
-  val create : filename:string -> string -> ctx
-
-  type t = private int
-  val union : t -> t -> t
-  val of_lexbuf : ctx -> Lexing.lexbuf -> t
-  val make : ctx -> off1:int -> off2:int -> t
-  val to_loc : ctx -> t -> Loc.t
-end
-
 (* TODO: structured name? like SMTLIB's composite identifiers *)
 module Name : sig
   type t = string

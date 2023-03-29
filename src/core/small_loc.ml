@@ -51,13 +51,11 @@ let tr_offset ctx off : int * int =
   let lazy index = ctx.index in
   Line_index.line_col_of_offset index ~off
 
-let tr_position ~ctx ~left (p:int) : Lexing.position =
+let tr_position ~ctx ~left (p:int) : Pp_loc.Position.t =
   let line, col = tr_offset ctx p in
-  {Lexing.pos_fname=ctx.filename;
-   pos_lnum=line;
-   pos_cnum=p + (if left then 0 else 1);
-   pos_bol=p - col;
-  }
+  Pp_loc.Position.of_line_col 
+    line
+    (col + (if left then 0 else 1))
 
 let to_pp_loc ~ctx (self:t) : Pp_loc.loc =
   let off1, off2 = offsets_ self in

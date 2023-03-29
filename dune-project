@@ -16,9 +16,9 @@
     (smtlib-utils (>= "0.3"))
     (ounit2 :with-test)
     logs
-    mtime
+    (mtime (>= 2.0))
     cmdliner
     (iter (>= "1.0"))
     (ocaml (>= "4.08"))
-    pp_loc
+    (pp_loc (>= 2.0))
     ))

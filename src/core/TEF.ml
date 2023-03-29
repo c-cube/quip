@@ -32,7 +32,7 @@ module Make()
 
   let get_ts () : float =
     let now = Mtime_clock.now() in
-    Mtime.Span.to_us (Mtime.span program_start now)
+    Mtime.Span.to_float_ns (Mtime.span program_start now)
 
   let emit_sep_ () =
     if !first_ then (
